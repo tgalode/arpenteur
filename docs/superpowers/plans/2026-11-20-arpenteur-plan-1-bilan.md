@@ -126,5 +126,36 @@ Chaque décision est suivie de ce qu'elle coûte si elle est fausse.
   - lignes du tableau non accessibles au clavier ;
   - stub jsdom jamais restauré ;
   - fenêtrage non testé ;
-  - bandeau d'échec non testé ;
-  - libellé « N pages », qui compte aussi les images.
+  - bandeau d'échec non testé.
+
+## Priorités ajoutées après comparaison avec Screaming Frog (20 novembre)
+
+Le plus gros écart n'est pas une fonction absente. Les 19 contrôles sont calculés, mais l'interface ne les affiche pas encore, et les analyses de SiteOne (sécurité, cache, accessibilité, titles dupliqués) ne sont pas exploitées.
+
+Pour auditer des sites de TPE et PME de quelques centaines de pages, l'ordre retenu est le suivant.
+
+1. **Le plan 2 tel que prévu** :
+   - panneau Problèmes avec le catalogue validé ;
+   - fusion avec les analyses de SiteOne ;
+   - export CSV ;
+   - écran Réglages ;
+   - vérification des cibles de canonical.
+
+   Sans le panneau et l'export, l'outil ne remplace pas encore Screaming Frog pour un audit.
+2. **Le mode liste** : crawler une liste d'URL collée. SiteOne le fait déjà (`url_list_urls`), il manque l'écran.
+3. **PageSpeed Insights et les Core Web Vitals**, par l'API PageSpeed (gratuite, avec une clé). Ils faisaient partie de l'audit de crocweb.fr d'avril.
+4. **L'aperçu du résultat Google** : title et meta description mesurés en pixels, et rendu du snippet. C'est très parlant pour un client.
+5. **La validation des données structurées** pour les résultats enrichis : FAQPage, LocalBusiness, Organization. Aujourd'hui, on vérifie seulement que le JSON-LD est lisible, et on ignore Microdata et RDFa.
+
+**Plus tard, au besoin**
+- Le rendu JavaScript, déjà disponible dans SiteOne mais désactivé en v1.
+- Les sites de plus de 10 000 URL.
+- L'authentification, les cookies et les en-têtes personnalisés.
+- La comparaison entre deux crawls.
+- Les intégrations Search Console, GA4, Ahrefs et Majestic.
+- L'extraction personnalisée en XPath, CSS ou regex.
+- Les quasi-doublons, le hreflang et la pagination.
+- Le score de maillage interne et la position des liens.
+- Les visualisations de l'arborescence.
+- Les exports en masse et vers Excel ou Google Sheets.
+- Le confort : choix des colonnes, menu contextuel, profils de configuration.
