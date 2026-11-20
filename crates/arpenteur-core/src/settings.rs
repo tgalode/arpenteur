@@ -53,6 +53,15 @@ pub fn default_user_agent() -> String {
     format!("Arpenteur/{}!", env!("CARGO_PKG_VERSION"))
 }
 
+/// User-Agent des requêtes propres de l'application, sans le drapeau SiteOne.
+pub fn plain_user_agent(settings: &CrawlSettings) -> String {
+    let ua = settings
+        .user_agent
+        .clone()
+        .unwrap_or_else(default_user_agent);
+    ua.trim_end_matches('!').trim_end().to_string()
+}
+
 pub fn build_argv(settings: &CrawlSettings, start: &Url, crawl_dir: &Path) -> Vec<String> {
     let user_agent = settings
         .user_agent
@@ -284,6 +293,19 @@ mod tests {
             ..filtered
         };
         assert_eq!(seeds(&no_robots), ["/blog/a", "/private/b"]);
+    }
+
+    #[test]
+    fn plain_user_agent_drops_the_siteone_flag() {
+        let mut settings = CrawlSettings::default();
+        assert_eq!(
+            plain_user_agent(&settings),
+            format!("Arpenteur/{}", env!("CARGO_PKG_VERSION"))
+        );
+        settings.user_agent = Some("Mon-UA !".to_string());
+        assert_eq!(plain_user_agent(&settings), "Mon-UA");
+        settings.user_agent = Some("Mon-UA".to_string());
+        assert_eq!(plain_user_agent(&settings), "Mon-UA");
     }
 
     #[test]

@@ -24,6 +24,8 @@ pub enum Variant {
     CanonicalOrphanTarget,
     /// `/` répond `content-encoding: br` à la requête de sonde seulement.
     BrotliOnProbe,
+    /// Comme `CanonicalOrphanTarget`, mais `/canon-target` accepte la connexion et ne répond jamais.
+    CanonicalTargetHangs,
 }
 
 /// `Accept-Encoding` envoyé par la sonde de compression.
@@ -142,7 +144,13 @@ async fn handle(State(st): State<AppState>, headers: HeaderMap, uri: Uri) -> Res
         )
             .into_response();
     }
-    if st.variant == Variant::CanonicalOrphanTarget {
+    if matches!(
+        st.variant,
+        Variant::CanonicalOrphanTarget | Variant::CanonicalTargetHangs
+    ) {
+        if st.variant == Variant::CanonicalTargetHangs && path == "/canon-target" {
+            std::future::pending::<()>().await;
+        }
         return match path.as_str() {
             "/robots.txt" => text("text/plain", "User-agent: *\nAllow: /\n".to_string()),
             "/" => html(

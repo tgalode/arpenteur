@@ -11,6 +11,9 @@ use url::Url;
 use crate::model::PageRecord;
 use crate::urls::{is_same_site, normalize_url};
 
+/// Délai de SiteOne pour ses propres requêtes.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub struct PostCrawl {
     pub content_encoding: Option<String>,
     pub pages: Vec<PageRecord>,
@@ -19,7 +22,16 @@ pub struct PostCrawl {
 /// Client des sondes : ni redirection suivie, ni décompression automatique
 /// (sinon reqwest retire `Content-Encoding` de la réponse).
 pub fn probe_client(user_agent: &str) -> Result<reqwest::Client, reqwest::Error> {
+    probe_client_with_timeout(user_agent, PROBE_TIMEOUT)
+}
+
+pub fn probe_client_with_timeout(
+    user_agent: &str,
+    timeout: Duration,
+) -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
+        .timeout(timeout)
+        .connect_timeout(timeout)
         .user_agent(user_agent)
         .redirect(reqwest::redirect::Policy::none())
         .no_gzip()
@@ -86,27 +98,24 @@ fn probe_targets(pages: &[PageRecord], start: &Url) -> Vec<Url> {
     targets
 }
 
-async fn probe_one(client: &reqwest::Client, url: &Url) -> PageRecord {
+/// `None` sur une erreur réseau (délai dépassé compris) : une requête ratée ne prouve rien
+/// sur la cible, on n'en tire aucun constat.
+async fn probe_one(client: &reqwest::Client, url: &Url) -> Option<PageRecord> {
     let began = Instant::now();
-    let result = client.get(url.clone()).send().await;
+    let response = client.get(url.clone()).send().await.ok()?;
     let elapsed_ms = began.elapsed().as_millis() as u64;
-    let (status, headers) = match result {
-        Ok(r) => {
-            let headers: BTreeMap<String, String> = r
-                .headers()
-                .iter()
-                .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
-                .collect();
-            (i32::from(r.status().as_u16()), headers)
-        }
-        Err(_) => (-1, BTreeMap::new()),
-    };
+    let headers: BTreeMap<String, String> = response
+        .headers()
+        .iter()
+        .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
+        .collect();
+    let status = i32::from(response.status().as_u16());
     let content_type = if (300..400).contains(&status) {
         "redirect"
     } else {
         "html"
     };
-    PageRecord {
+    Some(PageRecord {
         url: url.to_string(),
         status,
         content_type: content_type.to_string(),
@@ -114,7 +123,7 @@ async fn probe_one(client: &reqwest::Client, url: &Url) -> PageRecord {
         elapsed_ms,
         headers,
         facts: None,
-    }
+    })
 }
 
 /// Interroge les cibles de canonical internes que le crawl n'a pas demandées,
@@ -137,7 +146,7 @@ pub async fn probe_canonical_targets(
             r = probe_one(client, &url) => r,
             _ = cancel.cancelled() => break,
         };
-        added.push(record);
+        added.extend(record);
     }
     added
 }
@@ -169,7 +178,12 @@ pub async fn run_post_crawl_probes(
             });
         if let Some(url) = sample.and_then(|p| Url::parse(&p.url).ok()) {
             budget -= 1;
-            content_encoding = probe_content_encoding(client, &url, cancel).await;
+            tokio::select! {
+                _ = tokio::time::sleep(min_interval) => {
+                    content_encoding = probe_content_encoding(client, &url, cancel).await;
+                }
+                _ = cancel.cancelled() => {}
+            }
         }
     }
     let pages = probe_canonical_targets(client, pages, start, budget, min_interval, cancel).await;

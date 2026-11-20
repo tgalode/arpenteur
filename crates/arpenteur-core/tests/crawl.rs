@@ -655,3 +655,142 @@ async fn compression_falls_back_to_first_internal_html_page() {
     assert_eq!(sampled_encoding(&site, pages).await.as_deref(), Some(""));
     assert_eq!(site.count("/dup1"), 1);
 }
+
+fn short_timeout_client() -> reqwest::Client {
+    arpenteur_core::canonical_probe::probe_client_with_timeout(
+        "Arpenteur-test",
+        Duration::from_millis(300),
+    )
+    .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn hanging_canonical_target_times_out_without_record() {
+    let site = start_fixture_site(Variant::CanonicalTargetHangs).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let pages = vec![fixture_page(
+        &format!("{}/x", site.base),
+        200,
+        Some(&format!("{}/canon-target", site.base)),
+    )];
+    let began = Instant::now();
+    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
+        &short_timeout_client(),
+        &pages,
+        &start,
+        10,
+        Duration::ZERO,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(began.elapsed() < Duration::from_secs(5));
+    assert!(added.is_empty());
+    assert_eq!(site.count("/canon-target"), 1);
+
+    let r = arpenteur_core::checks::assemble(
+        arpenteur_core::model::CrawlMeta {
+            id: "i".into(),
+            domain: "d".into(),
+            start_url: start.to_string(),
+            started_at: String::new(),
+            finished_at: None,
+            status: CrawlStatus::Completed,
+            settings: fast_settings(),
+            pages: 1,
+        },
+        arpenteur_core::model::CollectedData {
+            pages: [pages, added].concat(),
+            ..Default::default()
+        },
+        None,
+    );
+    assert!(
+        !r.findings
+            .iter()
+            .any(|f| f.code == FindingCode::CanonicalToError)
+    );
+    assert!(
+        r.findings
+            .iter()
+            .any(|f| f.code == FindingCode::CanonicalToOtherUrl)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn closed_port_canonical_target_leaves_no_record() {
+    let site = start_fixture_site(Variant::CanonicalOrphanTarget).await;
+    let closed = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let pages = vec![fixture_page(
+        &format!("{}/x", site.base),
+        200,
+        Some(&format!("http://127.0.0.1:{closed}/ailleurs")),
+    )];
+    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
+        &probe_client(),
+        &pages,
+        &start,
+        10,
+        Duration::ZERO,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(added.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn compression_probe_is_none_on_timeout_and_network_error() {
+    let site = start_fixture_site(Variant::CanonicalTargetHangs).await;
+    let hanging = Url::parse(&format!("{}/canon-target", site.base)).unwrap();
+    let probe = arpenteur_core::canonical_probe::probe_content_encoding;
+    let live = CancellationToken::new();
+    assert_eq!(probe(&short_timeout_client(), &hanging, &live).await, None);
+    let closed = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let refused = Url::parse(&format!("http://127.0.0.1:{closed}/")).unwrap();
+    assert_eq!(probe(&probe_client(), &refused, &live).await, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn compression_probe_waits_min_interval_and_is_cancel_aware() {
+    let site = start_fixture_site(Variant::BrotliOnProbe).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let pages = vec![fixture_page(&format!("{}/", site.base), 200, None)];
+    let run = |interval: Duration, cancel: CancellationToken| {
+        let (pages, start) = (pages.clone(), start.clone());
+        async move {
+            arpenteur_core::canonical_probe::run_post_crawl_probes(
+                &probe_client(),
+                &pages,
+                &start,
+                100,
+                interval,
+                &cancel,
+            )
+            .await
+        }
+    };
+
+    let began = Instant::now();
+    let r = run(Duration::from_millis(400), CancellationToken::new()).await;
+    assert!(began.elapsed() >= Duration::from_millis(400));
+    assert_eq!(r.content_encoding.as_deref(), Some("br"));
+
+    let before = site.requests.lock().unwrap().len();
+    let cancel = CancellationToken::new();
+    let canceller = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        canceller.cancel();
+    });
+    let began = Instant::now();
+    let r = run(Duration::from_secs(30), cancel).await;
+    assert!(began.elapsed() < Duration::from_secs(5));
+    assert!(r.content_encoding.is_none());
+    assert_eq!(site.requests.lock().unwrap().len(), before);
+}

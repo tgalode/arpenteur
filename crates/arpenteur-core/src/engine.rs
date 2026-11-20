@@ -78,7 +78,7 @@ use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
 use crate::model::{
     CollectedData, CrawlLocation, CrawlMeta, CrawlSettings, CrawlStatus, SitemapResult,
 };
-use crate::settings::{CrawlError, build_core_options, crawl_seeds, default_user_agent};
+use crate::settings::{CrawlError, build_core_options, crawl_seeds, plain_user_agent};
 use crate::sitemap::discover;
 use crate::storage::CrawlStore;
 
@@ -89,14 +89,8 @@ const NO_PAGE_LOADED_MESSAGE: &str =
     "Aucune page n'a pu être chargée. Vérifiez l'adresse ou la connexion.";
 
 fn http_client(settings: &CrawlSettings) -> Result<reqwest::Client, CrawlError> {
-    let ua = settings
-        .user_agent
-        .clone()
-        .unwrap_or_else(default_user_agent);
-    // Le `!` final est un drapeau SiteOne, pas une partie du User-Agent.
-    let ua = ua.trim_end_matches('!').trim_end();
     reqwest::Client::builder()
-        .user_agent(ua)
+        .user_agent(plain_user_agent(settings))
         .build()
         .map_err(|e| CrawlError::Options(e.to_string()))
 }
@@ -232,12 +226,7 @@ pub async fn run_crawl(
     if status == CrawlStatus::Completed {
         // Après un crawl terminé seulement, au même débit et dans la même limite.
         if let Ok((min_interval, _)) = sitemap_budget(&settings) {
-            let ua = settings
-                .user_agent
-                .clone()
-                .unwrap_or_else(default_user_agent);
-            let ua = ua.trim_end_matches('!').trim_end().to_string();
-            if let Ok(client) = probe_client(&ua) {
+            if let Ok(client) = probe_client(&plain_user_agent(&settings)) {
                 let probed = run_post_crawl_probes(
                     &client,
                     &pages,
