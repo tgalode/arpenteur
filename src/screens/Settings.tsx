@@ -27,9 +27,17 @@ function toForm(s: CrawlSettings): Form {
   };
 }
 
-function parseNumber(text: string): number {
+const U32_MAX = 4_294_967_295;
+
+/** Entier écrit en chiffres seulement ; un dépassement de u32 est ramené au maximum pour que Rust le refuse avec son message. */
+function parseInteger(text: string): number {
+  const clean = text.trim();
+  return /^\d+$/.test(clean) ? Math.min(Number(clean), U32_MAX) : Number.NaN;
+}
+
+function parseRate(text: string): number {
   const clean = text.trim().replace(",", ".");
-  return clean === "" ? Number.NaN : Number(clean);
+  return /^\d+(\.\d+)?$/.test(clean) ? Math.min(Number(clean), Number.MAX_VALUE) : Number.NaN;
 }
 
 function lines(text: string): string[] {
@@ -40,27 +48,25 @@ function lines(text: string): string[] {
 }
 
 function toSettings(form: Form): { settings?: CrawlSettings; errors: string[] } {
-  const numbers = {
-    workers: parseNumber(form.workers),
-    maxReqsPerSec: parseNumber(form.rate),
-    maxRequests: parseNumber(form.maxRequests),
-    limitThreshold: parseNumber(form.limitThreshold),
-  };
-  const labels = {
-    workers: t("settings_workers"),
-    maxReqsPerSec: t("settings_rate"),
-    maxRequests: t("settings_maxRequests"),
-    limitThreshold: t("settings_limitThreshold"),
-  };
-  const errors = (Object.keys(numbers) as (keyof typeof numbers)[])
-    .filter((k) => Number.isNaN(numbers[k]))
-    .map((k) => t("settings_notNumber", { field: labels[k] }));
+  const workers = parseInteger(form.workers);
+  const maxReqsPerSec = parseRate(form.rate);
+  const maxRequests = parseInteger(form.maxRequests);
+  const limitThreshold = parseInteger(form.limitThreshold);
+  const errors = [
+    Number.isNaN(workers) && t("settings_notInteger", { field: t("settings_workers") }),
+    Number.isNaN(maxReqsPerSec) && t("settings_notDecimal", { field: t("settings_rate") }),
+    Number.isNaN(maxRequests) && t("settings_notInteger", { field: t("settings_maxRequests") }),
+    Number.isNaN(limitThreshold) && t("settings_notInteger", { field: t("settings_limitThreshold") }),
+  ].filter((m): m is string => m !== false);
   if (errors.length > 0) return { errors };
   const userAgent = form.userAgent.trim();
   return {
     errors,
     settings: {
-      ...numbers,
+      workers,
+      maxReqsPerSec,
+      maxRequests,
+      limitThreshold,
       respectRobots: form.respectRobots,
       userAgent: userAgent === "" ? null : userAgent,
       includeRegex: lines(form.include),

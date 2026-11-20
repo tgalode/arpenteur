@@ -79,11 +79,35 @@ test("les erreurs de validation s’affichent et rien n’est enregistré", asyn
   expect((screen.getByLabelText("débit (requêtes par seconde)") as HTMLInputElement).value).toBe("0");
 });
 
-test("un nombre illisible est refusé sans appeler saveSettings", async () => {
+test.each([
+  ["connexions simultanées", "4.5"],
+  ["connexions simultanées", "abc"],
+  ["limite de requêtes", "-1"],
+  ["seuil de limitation", "1e3"],
+  ["seuil de limitation", "0x10"],
+  ["débit (requêtes par seconde)", "Infinity"],
+  ["débit (requêtes par seconde)", "0x10"],
+  ["débit (requêtes par seconde)", "1e3"],
+  ["débit (requêtes par seconde)", "-1"],
+  ["débit (requêtes par seconde)", "1,2,3"],
+])("%s = « %s » est refusé en français sans appeler saveSettings", async (label, value) => {
   render(<Settings onBack={() => {}} />);
-  await setField("connexions simultanées", "abc");
+  await setField(label, value);
   await userEvent.click(screen.getByRole("button", { name: "enregistrer" }));
-  expect((await screen.findByRole("alert")).textContent).toContain("connexions simultanées");
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain(label);
+  expect(alert.textContent).toMatch(/entier|nombre décimal/);
+  expect(api.saveSettings).not.toHaveBeenCalled();
+  expect((screen.getByLabelText(label) as HTMLInputElement).value).toBe(value);
+});
+
+test("toutes les erreurs de saisie s’affichent ensemble", async () => {
+  render(<Settings onBack={() => {}} />);
+  await setField("connexions simultanées", "4.5");
+  await setField("limite de requêtes", "-1");
+  await userEvent.click(screen.getByRole("button", { name: "enregistrer" }));
+  const alert = await screen.findByRole("alert");
+  expect(alert.querySelectorAll("li")).toHaveLength(2);
   expect(api.saveSettings).not.toHaveBeenCalled();
 });
 

@@ -199,7 +199,8 @@ export const fr = {
   settings_save: "enregistrer",
   settings_saved: "réglages enregistrés.",
   settings_errors: "réglages refusés, rien n’a été enregistré :",
-  settings_notNumber: "{field} : saisissez un nombre.",
+  settings_notInteger: "{field} : un nombre entier est attendu.",
+  settings_notDecimal: "{field} : un nombre décimal est attendu (chiffres, avec une virgule ou un point).",
 } as const;
 
 export type FrKey = keyof typeof fr;

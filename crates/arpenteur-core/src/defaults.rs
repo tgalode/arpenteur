@@ -48,7 +48,13 @@ pub fn validate_settings(s: &CrawlSettings) -> Result<(), Vec<String>> {
 /// Même compilation que SiteOne : un motif qui échoue ici serait ignoré en silence au crawl.
 fn check_patterns(label: &str, patterns: &[String], errors: &mut Vec<String>) {
     for p in patterns {
-        if Regex::new(&extract_pcre_regex_pattern(p)).is_err() {
+        if p.contains(',') {
+            errors.push(format!(
+                "{label} invalide : « {p} » contient une virgule, que SiteOne lit comme un séparateur. \
+                 Écrivez \\x2C pour une virgule littérale ; une répétition {{n,m}} n'est pas prise en charge \
+                 (écrivez par exemple \\d\\d?\\d? ou deux motifs)."
+            ));
+        } else if Regex::new(&extract_pcre_regex_pattern(p)).is_err() {
             errors.push(format!("{label} invalide : « {p} » ne compile pas."));
         }
     }
@@ -102,6 +108,21 @@ mod tests {
         assert_eq!(errors.len(), 2);
         assert!(errors[0].contains("« ( »"));
         assert!(errors[1].contains("[a-"));
+    }
+
+    #[test]
+    fn rejects_regex_with_comma_because_siteone_splits_it() {
+        let with = |r: &str| CrawlSettings {
+            include_regex: vec![r.to_string()],
+            ignore_regex: vec![r.to_string()],
+            ..CrawlSettings::default()
+        };
+        let errors = validate_settings(&with("a{1,3}")).unwrap_err();
+        assert_eq!(errors.len(), 2);
+        assert!(errors[0].contains("« a{1,3} »") && errors[0].contains("\\x2C"));
+        assert!(validate_settings(&with("a,b")).is_err());
+        assert!(validate_settings(&with("a{1}")).is_ok());
+        assert!(validate_settings(&with("a\\x2Cb")).is_ok());
     }
 
     #[test]
