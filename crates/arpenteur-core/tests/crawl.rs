@@ -2,8 +2,15 @@ mod support;
 
 use std::time::{Duration, Instant};
 
+use std::sync::Arc;
+
+use arpenteur_core::collector::CrawlEvents;
+use arpenteur_core::engine::run_crawl;
+use arpenteur_core::model::{CrawlMeta, CrawlSettings, CrawlStatus, Progress};
 use arpenteur_core::sitemap::{discover, discover_with_limit};
+use arpenteur_core::storage::CrawlStore;
 use support::{Variant, start_fixture_site};
+use tokio_util::sync::CancellationToken;
 use url::Url;
 
 fn client() -> reqwest::Client {
@@ -95,4 +102,89 @@ async fn truncated_sitemap_records_error() {
     let result = discover(&client(), &start, Duration::ZERO, 10_000).await;
     assert!(!result.found);
     assert!(result.errors.iter().any(|e| e.contains("tronqué")));
+}
+
+struct NoEvents;
+
+impl CrawlEvents for NoEvents {
+    fn progress(&self, _p: &Progress) {}
+}
+
+struct CancelOnFirstProgress(CancellationToken);
+
+impl CrawlEvents for CancelOnFirstProgress {
+    fn progress(&self, _p: &Progress) {
+        self.0.cancel();
+    }
+}
+
+fn fast_settings() -> CrawlSettings {
+    CrawlSettings {
+        workers: 2,
+        max_reqs_per_sec: 50.0,
+        ..CrawlSettings::default()
+    }
+}
+
+async fn run(
+    variant: Variant,
+    events: impl FnOnce(&CancellationToken) -> Arc<dyn CrawlEvents>,
+) -> (
+    support::FixtureSite,
+    CrawlStore,
+    arpenteur_core::model::CrawlLocation,
+    CrawlMeta,
+    tempfile::TempDir,
+) {
+    let site = start_fixture_site(variant).await;
+    let root = tempfile::tempdir().unwrap();
+    let store = CrawlStore::new(root.path().to_path_buf());
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let settings = fast_settings();
+    let loc = store
+        .create_crawl(start.host_str().unwrap(), chrono::Local::now())
+        .unwrap();
+    let cancel = CancellationToken::new();
+    let events = events(&cancel);
+    let meta = run_crawl(settings, start, store.clone(), loc.clone(), events, cancel).await;
+    (site, store, loc, meta, root)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn crawl_completes_and_writes_files() {
+    let (site, store, loc, meta, _root) = run(Variant::Standard, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    for f in ["crawl.json", "arpenteur.json", "siteone.json"] {
+        assert!(loc.dir.join(f).exists(), "{f}");
+    }
+    let (m, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(m.status, CrawlStatus::Completed);
+    assert_eq!(m.pages as usize, data.pages.len());
+    for path in ["/", "/a", "/b", "/orphan", "/img/big.jpg"] {
+        let url = format!("{}{}", site.base, path);
+        assert!(data.pages.iter().any(|p| p.url == url), "{url}");
+    }
+    assert!(data.sitemap.found);
+    assert!(!site.requested("/app.js") && !site.requested("/style.css"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stop_keeps_collected_pages() {
+    let (_site, store, loc, meta, _root) = run(Variant::Standard, |cancel| {
+        Arc::new(CancelOnFirstProgress(cancel.clone()))
+    })
+    .await;
+    assert_eq!(meta.status, CrawlStatus::Stopped);
+    let (m, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(m.status, CrawlStatus::Stopped);
+    assert!(!data.pages.is_empty());
+    assert!(m.finished_at.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn throttled_site_stops_crawl() {
+    let (_site, store, loc, meta, _root) = run(Variant::Throttled, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Throttled);
+    let (m, _) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(m.status, CrawlStatus::Throttled);
 }

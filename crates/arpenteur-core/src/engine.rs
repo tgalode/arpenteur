@@ -1,5 +1,4 @@
-//! Enregistrement des analyseurs de siteone-crawler.
-//! Manager::run() future is Send: tokio::spawn is used.
+//! Lancement d'un crawl et enregistrement des analyseurs de siteone-crawler.
 //! Il exige un runtime multi-thread (DnsAnalyzer appelle block_in_place).
 
 use siteone_crawler::analysis::accessibility_analyzer::AccessibilityAnalyzer;
@@ -65,4 +64,136 @@ pub fn register_builtin_analyzers(am: &mut AnalysisManager, options: &CoreOption
     let mut ssl_tls = SslTlsAnalyzer::new();
     ssl_tls.set_config(options.accept_invalid_certs);
     am.register_analyzer(Box::new(ssl_tls));
+}
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use siteone_crawler::engine::manager::Manager;
+use tokio_util::sync::CancellationToken;
+use url::Url;
+
+use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
+use crate::model::{CollectedData, CrawlLocation, CrawlMeta, CrawlSettings, CrawlStatus, SitemapResult};
+use crate::settings::{CrawlError, build_core_options, default_user_agent};
+use crate::sitemap::discover;
+use crate::storage::CrawlStore;
+
+fn http_client(settings: &CrawlSettings) -> Result<reqwest::Client, CrawlError> {
+    let ua = settings.user_agent.clone().unwrap_or_else(default_user_agent);
+    // Le `!` final est un drapeau SiteOne, pas une partie du User-Agent.
+    let ua = ua.trim_end_matches('!').trim_end();
+    reqwest::Client::builder()
+        .user_agent(ua)
+        .build()
+        .map_err(|e| CrawlError::Options(e.to_string()))
+}
+
+fn sitemap_budget(settings: &CrawlSettings) -> Result<(Duration, usize), CrawlError> {
+    if !(settings.max_reqs_per_sec > 0.0 && settings.max_reqs_per_sec.is_finite()) {
+        return Err(CrawlError::Options(
+            "le débit maximal doit être strictement positif".to_string(),
+        ));
+    }
+    Ok((
+        Duration::from_secs_f64(1.0 / settings.max_reqs_per_sec),
+        settings.max_requests as usize,
+    ))
+}
+
+/// Découverte du sitemap puis crawl SiteOne ; renvoie le statut final et les pages collectées.
+async fn execute(
+    settings: &CrawlSettings,
+    start: &Url,
+    location: &CrawlLocation,
+    events: Arc<dyn CrawlEvents>,
+    cancel: &CancellationToken,
+) -> (CrawlStatus, Option<CollectorHandle>, SitemapResult) {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let prepared = http_client(settings).and_then(|client| Ok((client, sitemap_budget(settings)?)));
+    let (client, (min_interval, max_urls)) = match prepared {
+        Ok(p) => p,
+        Err(e) => return (CrawlStatus::Failed { message: e.to_string() }, None, SitemapResult::default()),
+    };
+
+    let sitemap = tokio::select! {
+        s = discover(&client, start, min_interval, max_urls) => s,
+        _ = cancel.cancelled() => return (CrawlStatus::Stopped, None, SitemapResult::default()),
+    };
+    if cancel.is_cancelled() {
+        return (CrawlStatus::Stopped, None, sitemap);
+    }
+
+    let options = match build_core_options(settings, start, &location.dir, sitemap.urls.clone()) {
+        Ok(o) => o,
+        Err(e) => return (CrawlStatus::Failed { message: e.to_string() }, None, sitemap),
+    };
+    let mut am = siteone_crawler::analysis::manager::AnalysisManager::new();
+    register_builtin_analyzers(&mut am, &options);
+    let (collector, handle) = PageCollector::new(events, settings.limit_threshold, cancel.clone());
+    am.register_analyzer(Box::new(collector));
+    am.auto_activate_analyzers();
+    let mut manager = match Manager::new(options, am) {
+        Ok(m) => m,
+        Err(e) => return (CrawlStatus::Failed { message: e.to_string() }, Some(handle), sitemap),
+    };
+
+    // Annuler le futur arrête la boucle de SiteOne : une URL = une tâche déjà lancée,
+    // donc au plus `workers` requêtes en vol se terminent, aucune nouvelle ne part.
+    let status = tokio::select! {
+        result = manager.run() => match result {
+            Ok(_) => CrawlStatus::Completed,
+            Err(e) => CrawlStatus::Failed { message: e.to_string() },
+        },
+        _ = cancel.cancelled() => if handle.was_throttled() {
+            CrawlStatus::Throttled
+        } else {
+            CrawlStatus::Stopped
+        },
+    };
+    (status, Some(handle), sitemap)
+}
+
+/// Ne renvoie jamais d'erreur : un échec devient `CrawlStatus::Failed`.
+pub async fn run_crawl(
+    settings: CrawlSettings,
+    start: Url,
+    store: CrawlStore,
+    location: CrawlLocation,
+    events: Arc<dyn CrawlEvents>,
+    cancel: CancellationToken,
+) -> CrawlMeta {
+    let mut meta = CrawlMeta {
+        id: location.id.clone(),
+        domain: location.domain.clone(),
+        start_url: start.as_str().to_string(),
+        started_at: chrono::Local::now().to_rfc3339(),
+        finished_at: None,
+        status: CrawlStatus::Running,
+        settings: settings.clone(),
+        pages: 0,
+    };
+    let write_failure = |e: std::io::Error| CrawlStatus::Failed {
+        message: format!("Écriture impossible : {e}"),
+    };
+    let initial_write = store.write_meta(&location, &meta);
+
+    let (status, handle, sitemap) = match initial_write {
+        Err(e) => (write_failure(e), None, SitemapResult::default()),
+        Ok(()) => execute(&settings, &start, &location, events, &cancel).await,
+    };
+
+    let pages = handle.map(|h| h.pages()).unwrap_or_default();
+    meta.pages = pages.len() as u32;
+    meta.status = status;
+    meta.finished_at = Some(chrono::Local::now().to_rfc3339());
+
+    if let Err(e) = store.write_data(&location, &CollectedData { pages, sitemap }) {
+        meta.status = write_failure(e);
+    }
+    if let Err(e) = store.write_meta(&location, &meta) {
+        meta.status = write_failure(e);
+    }
+    meta
 }

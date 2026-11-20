@@ -122,6 +122,7 @@ dependencies = [
  "flate2",
  "quick-xml",
  "reqwest",
+ "rustls",
  "scraper",
  "serde",
  "serde_json",
