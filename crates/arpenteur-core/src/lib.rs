@@ -5,4 +5,5 @@ pub mod limit_guard;
 pub mod model;
 pub mod settings;
 pub mod sitemap;
+pub mod storage;
 pub mod urls;

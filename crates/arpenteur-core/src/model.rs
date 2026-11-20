@@ -113,7 +113,7 @@ pub struct JsonLd {
     pub types: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SitemapResult {
     pub found: bool,
@@ -210,7 +210,7 @@ pub struct CrawlMeta {
     pub pages: u32,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectedData {
     pub pages: Vec<PageRecord>,
