@@ -26,7 +26,7 @@ pub fn start_crawl(
     settings: Option<CrawlSettings>,
 ) -> Result<StartedCrawl, String> {
     let start = normalize_start_url(&url).map_err(|e| e.to_string())?;
-    let cancel = state
+    let running = state
         .try_begin()
         .map_err(|_| "Un crawl est déjà en cours.".to_string())?;
 
@@ -34,7 +34,7 @@ pub fn start_crawl(
     let location = match state.store.create_crawl(&domain, Local::now()) {
         Ok(location) => location,
         Err(e) => {
-            state.finish();
+            state.finish(running.id);
             return Err(e.to_string());
         }
     };
@@ -46,10 +46,12 @@ pub fn start_crawl(
     let store = state.store.clone();
     let events = Arc::new(TauriEvents::new(app.clone()));
     let settings = settings.unwrap_or_default();
+    let run_id = running.id;
+    let cancel = running.token;
     let started_at = Local::now().to_rfc3339();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
-        let _guard = FinishGuard(&state);
+        let _guard = FinishGuard(&state, run_id);
         let inner = tauri::async_runtime::spawn(run_crawl(
             settings.clone(),
             start.clone(),
@@ -77,7 +79,7 @@ pub fn start_crawl(
                 meta
             }
         };
-        state.finish();
+        state.finish(run_id);
         let _ = app.emit("crawl-finished", &meta);
     });
 

@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use arpenteur_core::storage::CrawlStore;
 use tokio_util::sync::CancellationToken;
@@ -6,7 +7,15 @@ use tokio_util::sync::CancellationToken;
 /// Un seul crawl à la fois : le jeton du crawl en cours, s'il y en a un.
 pub struct AppState {
     pub store: CrawlStore,
-    running: Mutex<Option<CancellationToken>>,
+    running: Mutex<Option<(u64, CancellationToken)>>,
+    next_id: AtomicU64,
+}
+
+/// Crawl accepté par `try_begin` : `id` sert à `finish`, `token` à l'annuler.
+#[derive(Debug)]
+pub struct RunningCrawl {
+    pub id: u64,
+    pub token: CancellationToken,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -17,24 +26,26 @@ impl AppState {
         Self {
             store,
             running: Mutex::new(None),
+            next_id: AtomicU64::new(0),
         }
     }
 
-    pub fn try_begin(&self) -> Result<CancellationToken, AlreadyRunning> {
+    pub fn try_begin(&self) -> Result<RunningCrawl, AlreadyRunning> {
         let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
         if running.is_some() {
             return Err(AlreadyRunning);
         }
         let token = CancellationToken::new();
-        *running = Some(token.clone());
-        Ok(token)
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        *running = Some((id, token.clone()));
+        Ok(RunningCrawl { id, token })
     }
 
     /// Annule le crawl en cours ; `false` s'il n'y en a pas.
     pub fn stop(&self) -> bool {
         let running = self.running.lock().unwrap_or_else(|e| e.into_inner());
         match running.as_ref() {
-            Some(token) => {
+            Some((_, token)) => {
                 token.cancel();
                 true
             }
@@ -42,17 +53,21 @@ impl AppState {
         }
     }
 
-    pub fn finish(&self) {
-        *self.running.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    /// Libère l'état seulement si `id` est encore le crawl courant.
+    pub fn finish(&self, id: u64) {
+        let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        if running.as_ref().is_some_and(|(current, _)| *current == id) {
+            *running = None;
+        }
     }
 }
 
 /// Libère l'état à la sortie de la portée, panique comprise.
-pub struct FinishGuard<'a>(pub &'a AppState);
+pub struct FinishGuard<'a>(pub &'a AppState, pub u64);
 
 impl Drop for FinishGuard<'_> {
     fn drop(&mut self) {
-        self.0.finish();
+        self.0.finish(self.1);
     }
 }
 
@@ -75,8 +90,8 @@ mod tests {
     #[test]
     fn finish_allows_a_new_crawl() {
         let (state, _dir) = state();
-        state.try_begin().unwrap();
-        state.finish();
+        let crawl = state.try_begin().unwrap();
+        state.finish(crawl.id);
         assert!(state.try_begin().is_ok());
     }
 
@@ -84,20 +99,32 @@ mod tests {
     fn stop_cancels_the_running_token() {
         let (state, _dir) = state();
         assert!(!state.stop());
-        let token = state.try_begin().unwrap();
+        let crawl = state.try_begin().unwrap();
         assert!(state.stop());
-        assert!(token.is_cancelled());
+        assert!(crawl.token.is_cancelled());
     }
 
     #[test]
     fn guard_releases_state_even_on_panic() {
         let (state, _dir) = state();
-        state.try_begin().unwrap();
+        let crawl = state.try_begin().unwrap();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _guard = FinishGuard(&state);
+            let _guard = FinishGuard(&state, crawl.id);
             panic!("panique simulée dans le crawl");
         }));
         assert!(result.is_err());
         assert!(state.try_begin().is_ok());
+    }
+
+    #[test]
+    fn late_finish_does_not_clear_a_newer_crawl() {
+        let (state, _dir) = state();
+        let a = state.try_begin().unwrap();
+        state.finish(a.id);
+        let b = state.try_begin().unwrap();
+        state.finish(a.id);
+        assert_eq!(state.try_begin().unwrap_err(), AlreadyRunning);
+        assert!(state.stop());
+        assert!(b.token.is_cancelled());
     }
 }
