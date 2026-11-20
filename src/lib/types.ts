@@ -34,6 +34,9 @@ export interface PageFacts {
   jsonLd: JsonLd[];
   wordCount: number;
   textHash: string;
+  lang: string | null;
+  headings: number[];
+  unlinkedPhones: string[];
 }
 
 export interface PageRecord {

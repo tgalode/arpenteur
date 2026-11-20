@@ -89,6 +89,12 @@ pub struct PageFacts {
     pub json_ld: Vec<JsonLd>,
     pub word_count: u32,
     pub text_hash: String,
+    #[serde(default)]
+    pub lang: Option<String>,
+    #[serde(default)]
+    pub headings: Vec<u8>,
+    #[serde(default)]
+    pub unlinked_phones: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -183,6 +183,9 @@ mod tests {
                 json_ld: vec![],
                 word_count: 0,
                 text_hash: String::new(),
+                lang: None,
+                headings: Vec::new(),
+                unlinked_phones: Vec::new(),
             });
             self.0
         }

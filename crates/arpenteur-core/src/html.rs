@@ -1,4 +1,7 @@
+use std::sync::LazyLock;
+
 use ego_tree::NodeRef;
+use regex::Regex;
 use scraper::{ElementRef, Html, Node, Selector};
 use sha2::{Digest, Sha256};
 use url::Url;
@@ -42,6 +45,91 @@ fn collect_visible(root: NodeRef<Node>, out: &mut Vec<String>) {
             _ => stack.extend(node.children().rev()),
         }
     }
+}
+
+/// Texte visible d'un sous-arbre, un séparateur `|` entre nœuds texte pour
+/// qu'un numéro ne puisse pas se recoller à travers deux éléments.
+fn collect_visible_text(root: NodeRef<Node>) -> String {
+    let mut out = String::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        match node.value() {
+            Node::Text(text) => {
+                out.push_str(&collapse(text));
+                out.push('|');
+            }
+            Node::Element(el) if HIDDEN_TEXT.contains(&el.name()) => {}
+            _ => stack.extend(node.children().rev()),
+        }
+    }
+    out
+}
+
+static PHONE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:\+33\s?(?:\(0\)\s?)?|0)[1-9](?:[\s.\-]?\d{2}){4}")
+        .expect("regex statique valide")
+});
+
+fn is_phone_sep(c: char) -> bool {
+    c.is_whitespace() || c == '.' || c == '-'
+}
+
+/// Vrai si le numéro est collé à d'autres chiffres (SIRET, prix, suite de
+/// nombres) avant ou après, séparateur éventuel compris.
+fn touches_digits(text: &str, start: usize, end: usize) -> bool {
+    let mut before = text[..start].chars().rev();
+    match before.next() {
+        Some(c) if c.is_ascii_digit() => return true,
+        Some(c) if is_phone_sep(c) && before.next().is_some_and(|d| d.is_ascii_digit()) => {
+            return true;
+        }
+        _ => {}
+    }
+    let mut after = text[end..].chars();
+    match after.next() {
+        Some(c) if c.is_ascii_digit() => true,
+        Some(c) if is_phone_sep(c) => after.next().is_some_and(|d| d.is_ascii_digit()),
+        _ => false,
+    }
+}
+
+/// Chiffres d'un numéro, `+33`/`0033` ramené à `0`.
+fn normalize_phone(raw: &str) -> String {
+    let mut cleaned = String::new();
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            chars.next();
+            chars.next();
+        } else {
+            cleaned.push(c);
+        }
+    }
+    let international = cleaned.trim_start().starts_with('+');
+    let mut digits: String = cleaned.chars().filter(char::is_ascii_digit).collect();
+    if let Some(rest) = digits.strip_prefix("0033") {
+        digits = format!("0{}", rest.strip_prefix('0').unwrap_or(rest));
+    } else if international && let Some(rest) = digits.strip_prefix("33") {
+        digits = format!("0{}", rest.strip_prefix('0').unwrap_or(rest));
+    }
+    digits
+}
+
+fn unlinked_phones(text: &str, linked: &[String]) -> Vec<String> {
+    let mut seen: Vec<String> = Vec::new();
+    let mut out = Vec::new();
+    for m in PHONE_RE.find_iter(text) {
+        if touches_digits(text, m.start(), m.end()) {
+            continue;
+        }
+        let digits = normalize_phone(m.as_str());
+        if linked.contains(&digits) || seen.contains(&digits) {
+            continue;
+        }
+        seen.push(digits);
+        out.push(m.as_str().to_owned());
+    }
+    out
 }
 
 fn json_ld_types(value: &serde_json::Value, types: &mut Vec<String>) {
@@ -142,10 +230,36 @@ pub fn extract_page(html: &str, page_url: &Url) -> PageFacts {
         .map(|s| parse_json_ld(&s.text().collect::<String>()))
         .collect();
 
+    let lang = doc
+        .select(&sel("html[lang]"))
+        .next()
+        .and_then(|h| h.value().attr("lang"))
+        .map(|l| l.trim().to_owned())
+        .filter(|l| !l.is_empty());
+
+    let headings = doc
+        .select(&sel("h1, h2, h3, h4, h5, h6"))
+        .filter_map(|h| h.value().name().strip_prefix('h')?.parse::<u8>().ok())
+        .collect();
+
+    let linked_phones: Vec<String> = doc
+        .select(&sel("a[href]"))
+        .filter_map(|a| {
+            let href = a.value().attr("href")?.trim();
+            let scheme = href.get(..4)?;
+            scheme
+                .eq_ignore_ascii_case("tel:")
+                .then(|| normalize_phone(&href[4..]))
+        })
+        .collect();
+
     let mut words = Vec::new();
+    let mut visible_text = String::new();
     if let Some(body) = doc.select(&sel("body")).next() {
         collect_visible(*body, &mut words);
+        visible_text = collect_visible_text(*body);
     }
+    let unlinked_phones = unlinked_phones(&visible_text, &linked_phones);
     let text_hash = Sha256::digest(words.join(" ").as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -162,6 +276,9 @@ pub fn extract_page(html: &str, page_url: &Url) -> PageFacts {
         json_ld,
         word_count: words.len() as u32,
         text_hash,
+        lang,
+        headings,
+        unlinked_phones,
     }
 }
 
@@ -308,5 +425,57 @@ mod tests {
         let bytes = b"<html><head><title>caf\xe9</title></head></html>";
         let f = facts(&String::from_utf8_lossy(bytes));
         assert!(f.title.is_some());
+    }
+
+    #[test]
+    fn extracts_html_lang() {
+        let f = facts(r#"<html lang="fr-FR"><body>x</body></html>"#);
+        assert_eq!(f.lang.as_deref(), Some("fr-FR"));
+        assert_eq!(facts("<html><body>x</body></html>").lang, None);
+    }
+
+    #[test]
+    fn extracts_heading_levels_in_order() {
+        let f = facts("<body><h1>a</h1><h2>b</h2><h3>c</h3><h2>d</h2></body>");
+        assert_eq!(f.headings, vec![1, 2, 3, 2]);
+    }
+
+    #[test]
+    fn detects_unlinked_french_phone() {
+        let f = facts("<body><p>Appelez le 02 99 12 34 56</p></body>");
+        assert_eq!(f.unlinked_phones, vec!["02 99 12 34 56"]);
+    }
+
+    #[test]
+    fn linked_phone_is_not_reported() {
+        let f = facts(
+            r#"<body><a href="tel:+33299123456">02 99 12 34 56</a> ou 02.99.12.34.56</body>"#,
+        );
+        assert!(f.unlinked_phones.is_empty());
+    }
+
+    #[test]
+    fn siret_and_prices_are_not_phones() {
+        let f = facts(
+            "<body><p>SIRET 123 456 789 00012</p><p>Prix 1 290,00 \u{20ac}</p>\
+             <p>12 02 99 12 34 56</p><p>02 99 12 34 56 78</p></body>",
+        );
+        assert!(f.unlinked_phones.is_empty(), "{:?}", f.unlinked_phones);
+    }
+
+    #[test]
+    fn international_phone_with_zero_in_parens_is_detected_once() {
+        let f = facts("<body>+33 (0)2 99 12 34 56 puis 0299123456</body>");
+        assert_eq!(f.unlinked_phones.len(), 1, "{:?}", f.unlinked_phones);
+    }
+
+    #[test]
+    fn old_facts_without_new_fields_deserialize() {
+        let json = r#"{"title":null,"metaDescription":null,"h1":[],"canonical":null,
+            "metaRobots":null,"links":[],"images":[],"jsonLd":[],"wordCount":0,"textHash":""}"#;
+        let f: crate::model::PageFacts = serde_json::from_str(json).unwrap();
+        assert_eq!(f.lang, None);
+        assert!(f.headings.is_empty());
+        assert!(f.unlinked_phones.is_empty());
     }
 }

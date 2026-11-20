@@ -319,6 +319,9 @@ mod tests {
                 }],
                 word_count: 300,
                 text_hash: format!("hash-{url}"),
+                lang: None,
+                headings: Vec::new(),
+                unlinked_phones: Vec::new(),
             }),
         })
     }
