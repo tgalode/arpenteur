@@ -22,6 +22,12 @@ struct Fetcher<'a> {
     client: &'a reqwest::Client,
     min_interval: Duration,
     first: bool,
+    max_bytes: u64,
+}
+
+struct Fetched {
+    body: Vec<u8>,
+    oversize: bool,
 }
 
 enum FetchError {
@@ -30,7 +36,7 @@ enum FetchError {
 }
 
 impl Fetcher<'_> {
-    async fn get(&mut self, url: &Url) -> Result<Vec<u8>, FetchError> {
+    async fn get(&mut self, url: &Url) -> Result<Fetched, FetchError> {
         if self.first {
             self.first = false;
         } else {
@@ -49,19 +55,55 @@ impl Fetcher<'_> {
         if !status.is_success() {
             return Err(FetchError::Other(format!("{url} : statut {status}")));
         }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| FetchError::Other(format!("{url} : {e}")))?;
+        let limit = self.max_bytes as usize;
+        let mut raw: Vec<u8> = Vec::new();
+        let mut oversize = false;
+        let mut response = response;
+        if response
+            .content_length()
+            .is_some_and(|n| n > self.max_bytes)
+        {
+            oversize = true;
+        }
+        while !oversize {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    if raw.len() + chunk.len() > limit {
+                        raw.extend_from_slice(&chunk[..limit - raw.len()]);
+                        oversize = true;
+                    } else {
+                        raw.extend_from_slice(&chunk);
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => return Err(FetchError::Other(format!("{url} : {e}"))),
+            }
+        }
         if url.path().ends_with(".gz") {
             let mut out = Vec::new();
-            flate2::read::GzDecoder::new(&bytes[..])
-                .take(MAX_FILE_BYTES)
+            flate2::read::GzDecoder::new(&raw[..])
+                .take(self.max_bytes + 1)
                 .read_to_end(&mut out)
-                .map_err(|e| FetchError::Other(format!("{url} : décompression : {e}")))?;
-            Ok(out)
+                .map_err(|e| {
+                    if oversize {
+                        FetchError::Other(format!("{url} : dépasse {} octets", self.max_bytes))
+                    } else {
+                        FetchError::Other(format!("{url} : décompression : {e}"))
+                    }
+                })?;
+            if out.len() > limit {
+                out.truncate(limit);
+                oversize = true;
+            }
+            Ok(Fetched {
+                body: out,
+                oversize,
+            })
         } else {
-            Ok(bytes.to_vec())
+            Ok(Fetched {
+                body: raw,
+                oversize,
+            })
         }
     }
 }
@@ -71,6 +113,17 @@ pub async fn discover(
     start: &Url,
     min_interval: Duration,
     max_urls: usize,
+) -> SitemapResult {
+    discover_with_limit(client, start, min_interval, max_urls, MAX_FILE_BYTES).await
+}
+
+/// Comme `discover`, avec une taille maximale par fichier (brut ou décompressé).
+pub async fn discover_with_limit(
+    client: &reqwest::Client,
+    start: &Url,
+    min_interval: Duration,
+    max_urls: usize,
+    max_file_bytes: u64,
 ) -> SitemapResult {
     let mut result = SitemapResult {
         found: false,
@@ -83,14 +136,20 @@ pub async fn discover(
         client,
         min_interval,
         first: true,
+        max_bytes: max_file_bytes,
     };
     let origin = start.origin().ascii_serialization();
 
     let mut declared: Vec<Url> = Vec::new();
     match Url::parse(&format!("{origin}/robots.txt")) {
         Ok(robots_url) => match fetcher.get(&robots_url).await {
-            Ok(bytes) => {
-                for line in String::from_utf8_lossy(&bytes).lines() {
+            Ok(fetched) => {
+                if fetched.oversize {
+                    result
+                        .errors
+                        .push(format!("{robots_url} : dépasse {max_file_bytes} octets"));
+                }
+                for line in String::from_utf8_lossy(&fetched.body).lines() {
                     if let Some(value) = sitemap_directive(line) {
                         match robots_url.join(value) {
                             Ok(u) => declared.push(u),
@@ -130,7 +189,7 @@ pub async fn discover(
             result.truncated = true;
             break;
         }
-        let bytes = match fetcher.get(&sitemap_url).await {
+        let fetched = match fetcher.get(&sitemap_url).await {
             Ok(b) => b,
             Err(FetchError::NotFound) if fallback => continue,
             Err(FetchError::NotFound) => {
@@ -144,7 +203,9 @@ pub async fn discover(
         };
         let mut children: Vec<String> = Vec::new();
         let mut capped = false;
-        let parsed = parse_locs(&bytes, |kind, loc| match kind {
+        let urls_before = result.urls.len();
+        let oversize = fetched.oversize;
+        let parsed = parse_locs(&fetched.body, |kind, loc| match kind {
             Kind::Index => {
                 children.push(loc);
                 true
@@ -168,6 +229,16 @@ pub async fn discover(
                 true
             }
         });
+        if oversize {
+            result.errors.push(format!(
+                "{sitemap_url} : dépasse {max_file_bytes} octets, fichier tronqué"
+            ));
+            if parsed.is_ok() || result.urls.len() > urls_before {
+                result.found = true;
+                result.sources.push(sitemap_url.to_string());
+            }
+            continue;
+        }
         match parsed {
             Ok(()) => {
                 result.found = true;
@@ -223,10 +294,12 @@ fn parse_locs(xml: &[u8], mut on_loc: impl FnMut(Kind, String) -> bool) -> Resul
     let mut reader = Reader::from_str(&text);
     let mut kind: Option<Kind> = None;
     let mut in_loc = false;
+    let mut depth: usize = 0;
     let mut buf = String::new();
     loop {
         match reader.read_event().map_err(|e| e.to_string())? {
             Event::Start(e) => {
+                depth += 1;
                 let name = e.local_name();
                 match name.as_ref() {
                     b"urlset" if kind.is_none() => kind = Some(Kind::UrlSet),
@@ -258,7 +331,12 @@ fn parse_locs(xml: &[u8], mut on_loc: impl FnMut(Kind, String) -> bool) -> Resul
                     }
                 }
             }
-            Event::End(e) if e.local_name().as_ref() == b"loc" => {
+            Event::End(_) if !in_loc => depth = depth.saturating_sub(1),
+            Event::End(e) => {
+                depth = depth.saturating_sub(1);
+                if e.local_name().as_ref() != b"loc" {
+                    continue;
+                }
                 in_loc = false;
                 let k = match kind {
                     Some(Kind::UrlSet) => Kind::UrlSet,
@@ -273,6 +351,9 @@ fn parse_locs(xml: &[u8], mut on_loc: impl FnMut(Kind, String) -> bool) -> Resul
             Event::Eof => break,
             _ => {}
         }
+    }
+    if depth > 0 {
+        return Err("fichier tronqué (balise non fermée)".to_string());
     }
     if kind.is_none() {
         return Err("ni urlset ni sitemapindex".to_string());

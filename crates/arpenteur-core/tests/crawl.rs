@@ -2,7 +2,7 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use arpenteur_core::sitemap::discover;
+use arpenteur_core::sitemap::{discover, discover_with_limit};
 use support::{Variant, start_fixture_site};
 use url::Url;
 
@@ -77,4 +77,22 @@ async fn respects_min_interval() {
         elapsed >= interval * (made - 1),
         "{elapsed:?} pour {made} requêtes"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn oversize_sitemap_records_error() {
+    let site = start_fixture_site(Variant::Standard).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let result = discover_with_limit(&client(), &start, Duration::ZERO, 10_000, 120).await;
+    assert!(result.urls.len() < 5);
+    assert!(result.errors.iter().any(|e| e.contains("dépasse 120")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn truncated_sitemap_records_error() {
+    let site = start_fixture_site(Variant::TruncatedSitemap).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let result = discover(&client(), &start, Duration::ZERO, 10_000).await;
+    assert!(!result.found);
+    assert!(result.errors.iter().any(|e| e.contains("tronqué")));
 }

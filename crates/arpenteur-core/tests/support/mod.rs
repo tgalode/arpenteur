@@ -16,6 +16,7 @@ pub enum Variant {
     NoSitemapLine,
     NoSitemap,
     HugeSitemap,
+    TruncatedSitemap,
 }
 
 pub struct FixtureSite {
@@ -65,7 +66,10 @@ fn redirect(status: StatusCode, to: &str) -> Response {
 }
 
 fn words(n: usize) -> String {
-    (0..n).map(|i| format!("mot{i}")).collect::<Vec<_>>().join(" ")
+    (0..n)
+        .map(|i| format!("mot{i}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn urlset(base: &str, paths: &[&str]) -> String {
@@ -109,6 +113,12 @@ async fn handle(State(st): State<AppState>, uri: Uri) -> Response {
         }
         "/sitemap.xml" => match st.variant {
             Variant::NoSitemap => StatusCode::NOT_FOUND.into_response(),
+            Variant::TruncatedSitemap => text(
+                "application/xml",
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{base}/a</loc></url><url><loc>{base}/b</loc></url><url><loc>{base}/c"#
+                ),
+            ),
             Variant::HugeSitemap => text(
                 "application/xml",
                 format!(
