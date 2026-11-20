@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { CrawlMeta, SiteSummary } from "../lib/types";
+import type { CrawlMeta, CrawlStatus, SiteSummary } from "../lib/types";
 
 vi.mock("../lib/api", () => ({
   listSites: vi.fn(),
@@ -11,14 +11,19 @@ vi.mock("../lib/api", () => ({
 import * as api from "../lib/api";
 import Home from "./Home";
 
-function meta(id: string, startedAt: string, pages: number): CrawlMeta {
+function meta(
+  id: string,
+  startedAt: string,
+  pages: number,
+  status: CrawlStatus = { kind: "completed" },
+): CrawlMeta {
   return {
     id,
     domain: "exemple.fr",
     startUrl: "https://exemple.fr/",
     startedAt,
     finishedAt: null,
-    status: { kind: "completed" },
+    status,
     settings: {
       workers: 1,
       maxReqsPerSec: 2,
@@ -75,4 +80,25 @@ test("Accueil liste les crawls du plus récent au plus ancien", async () => {
   expect(items[0].textContent).toContain("Terminé");
   await userEvent.click(items[0]);
   expect(onOpen).toHaveBeenCalledWith("exemple.fr", "recent", false);
+});
+
+test("Accueil rouvre un crawl en cours avec sa progression", async () => {
+  const sites: SiteSummary[] = [
+    {
+      domain: "exemple.fr",
+      crawls: [
+        meta("fini", "2026-01-01T10:00:00Z", 11),
+        meta("actif", "2026-03-01T10:00:00Z", 0, { kind: "running" }),
+      ],
+    },
+  ];
+  vi.mocked(api.listSites).mockResolvedValue(sites);
+  const onOpen = vi.fn();
+  render(<Home onOpen={onOpen} />);
+  const items = await screen.findAllByRole("button", { name: /pages/ });
+  expect(items[0].textContent).toContain("En cours");
+  await userEvent.click(items[0]);
+  expect(onOpen).toHaveBeenLastCalledWith("exemple.fr", "actif", true);
+  await userEvent.click(items[1]);
+  expect(onOpen).toHaveBeenLastCalledWith("exemple.fr", "fini", false);
 });

@@ -7,10 +7,13 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::checks::assemble;
-use crate::model::{CollectedData, CrawlLocation, CrawlMeta, CrawlResult, SiteSummary};
+use crate::model::{
+    CollectedData, CrawlLocation, CrawlMeta, CrawlResult, CrawlStatus, SiteSummary,
+};
 
 const META_FILE: &str = "crawl.json";
 const DATA_FILE: &str = "arpenteur.json";
+const INTERRUPTED_MESSAGE: &str = "Crawl interrompu par la fermeture de l'application.";
 
 #[derive(Clone, Debug)]
 pub struct CrawlStore {
@@ -119,6 +122,40 @@ impl CrawlStore {
         Ok((meta, data))
     }
 
+    /// À appeler au démarrage, quand aucun crawl ne tourne : un crawl encore
+    /// « en cours » a été interrompu par la fermeture de l'application et passe
+    /// en échec. Renvoie le nombre de crawls corrigés ; un fichier illisible est ignoré.
+    pub fn recover_interrupted(&self) -> io::Result<u32> {
+        let sites = match fs::read_dir(self.sites_dir()) {
+            Ok(e) => e,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+            Err(e) => return Err(e),
+        };
+        let mut fixed = 0;
+        for site in sites.flatten() {
+            let Ok(crawls) = fs::read_dir(site.path()) else {
+                continue;
+            };
+            for crawl in crawls.flatten() {
+                let path = crawl.path().join(META_FILE);
+                let Ok(mut meta) = read_json::<CrawlMeta>(&path) else {
+                    continue;
+                };
+                if meta.status != CrawlStatus::Running {
+                    continue;
+                }
+                meta.status = CrawlStatus::Failed {
+                    message: INTERRUPTED_MESSAGE.to_string(),
+                };
+                meta.finished_at
+                    .get_or_insert_with(|| Local::now().to_rfc3339());
+                write_json_atomic(&path, &meta)?;
+                fixed += 1;
+            }
+        }
+        Ok(fixed)
+    }
+
     pub fn load_result(&self, domain: &str, id: &str) -> io::Result<CrawlResult> {
         let (meta, data) = self.read_crawl(domain, id)?;
         Ok(assemble(meta, data))
@@ -158,7 +195,7 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CrawlSettings, CrawlStatus};
+    use crate::model::CrawlSettings;
     use chrono::{NaiveDate, TimeZone};
 
     fn fixed() -> DateTime<Local> {
@@ -294,6 +331,51 @@ mod tests {
             assert_eq!(e.kind(), io::ErrorKind::InvalidInput, "id {bad:?}");
         }
         assert!(store.read_crawl("exemple.fr", &loc.id).is_ok());
+    }
+
+    #[test]
+    fn recover_interrupted_fails_running_crawls() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CrawlStore::new(tmp.path().to_path_buf());
+        let running = |domain: &str, finished_at: Option<&str>| {
+            let loc = store.create_crawl(domain, fixed()).unwrap();
+            let mut m = meta(&loc.id, domain);
+            m.status = CrawlStatus::Running;
+            m.finished_at = finished_at.map(str::to_string);
+            store.write_meta(&loc, &m).unwrap();
+            loc
+        };
+        let open = running("exemple.fr", None);
+        let dated = running("exemple.fr", Some("2026-11-20T14:05:00+01:00"));
+        let done = store.create_crawl("autre.fr", fixed()).unwrap();
+        store.write_meta(&done, &meta(&done.id, "autre.fr")).unwrap();
+        let broken = tmp.path().join("sites/exemple.fr/casse");
+        fs::create_dir_all(&broken).unwrap();
+        fs::write(broken.join("crawl.json"), "{").unwrap();
+
+        assert_eq!(store.recover_interrupted().unwrap(), 2);
+
+        let interrupted = CrawlStatus::Failed {
+            message: "Crawl interrompu par la fermeture de l'application.".to_string(),
+        };
+        let (m, _) = store.read_crawl("exemple.fr", &open.id).unwrap();
+        assert_eq!(m.status, interrupted);
+        assert!(m.finished_at.is_some());
+        let (m, _) = store.read_crawl("exemple.fr", &dated.id).unwrap();
+        assert_eq!(m.status, interrupted);
+        assert_eq!(m.finished_at.as_deref(), Some("2026-11-20T14:05:00+01:00"));
+        let (m, _) = store.read_crawl("autre.fr", &done.id).unwrap();
+        assert_eq!(m.status, CrawlStatus::Completed);
+        assert_eq!(fs::read_to_string(broken.join("crawl.json")).unwrap(), "{");
+
+        assert_eq!(store.recover_interrupted().unwrap(), 0);
+    }
+
+    #[test]
+    fn recover_interrupted_without_root_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CrawlStore::new(tmp.path().join("absent"));
+        assert_eq!(store.recover_interrupted().unwrap(), 0);
     }
 
     #[test]

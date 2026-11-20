@@ -70,7 +70,7 @@ export default function Home({ onOpen }: { onOpen: (domain: string, id: string, 
               .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
               .map((c) => (
                 <li key={c.id}>
-                  <button type="button" onClick={() => onOpen(site.domain, c.id, false)}>
+                  <button type="button" onClick={() => onOpen(site.domain, c.id, c.status.kind === "running")}>
                     {formatDate(c.startedAt)} · {statusLabel(c)} · {t("pages", { count: c.pages })}
                   </button>
                 </li>

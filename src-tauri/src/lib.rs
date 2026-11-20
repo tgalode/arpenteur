@@ -13,7 +13,10 @@ pub fn run() {
         .setup(|app| {
             let root = app.path().app_data_dir()?;
             std::fs::create_dir_all(&root)?;
-            app.manage(AppState::new(CrawlStore::new(root)));
+            let store = CrawlStore::new(root);
+            // Aucun crawl ne tourne encore : un crawl « en cours » a été interrompu.
+            let _ = store.recover_interrupted();
+            app.manage(AppState::new(store));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
