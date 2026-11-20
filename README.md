@@ -16,7 +16,7 @@ Un écran « à propos » donne la version et la licence du moteur de crawl.
 
 ## Installation
 
-Téléchargez l'installeur correspondant à votre système, puis lancez-le. Les installeurs ne sont pas signés (la signature de code est payante) : macOS et Windows affichent donc un avertissement au premier lancement.
+Téléchargez l'installeur correspondant à votre système, puis lancez-le. Les installeurs ne sont pas signés par un certificat reconnu par Apple ou Microsoft (c'est payant) : macOS et Windows affichent donc un avertissement au premier lancement.
 
 ### macOS
 
@@ -58,7 +58,7 @@ Une version est construite par l'intégration continue quand on pousse un tag `X
 2. Faites un commit.
 3. Posez le tag : `git tag 0.2.0`.
 4. Poussez le tag : `git push origin 0.2.0`.
-5. Attendez la fin du workflow « Release » dans l'onglet Actions de GitHub. Il s'arrête tout de suite si le tag diffère de la version de `package.json`.
+5. Attendez la fin du workflow « Release » dans l'onglet Actions de GitHub. Il s'arrête tout de suite si le tag diffère de la version de l'un des trois fichiers qui la portent (`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`).
 6. Ouvrez la release en brouillon, vérifiez les fichiers, puis publiez-la.
 
 Le workflow produit un `.dmg` pour les Mac Apple Silicon et un installeur `.exe` NSIS pour Windows. Ni l'un ni l'autre n'est signé.

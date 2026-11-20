@@ -30,9 +30,9 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          package=$(node -p "require('./package.json').version")
-          tauri=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -n 1)
+          package=$(node -p "require('./package.json').version" | tr -d '\r')
+          tauri=$(node -p "require('./src-tauri/tauri.conf.json').version" | tr -d '\r')
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -n 1 | tr -d '\r')
           status=0
           for source in "package.json:$package" "src-tauri/tauri.conf.json:$tauri" "src-tauri/Cargo.toml:$cargo"; do
             file=${source%%:*}
