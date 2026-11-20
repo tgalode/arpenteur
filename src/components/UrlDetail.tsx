@@ -1,6 +1,8 @@
 import { t } from "../i18n/fr";
+import { CATALOG, findingFix, findingTitle, findingWhy } from "../lib/catalog";
 import { normalizeUrl } from "../lib/urls";
 import type { CrawlResult, UrlRow } from "../lib/types";
+import { LEVELS, levelLabel } from "./ProblemsPanel";
 
 export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult }) {
   const page = result.pages.find((p) => p.url === row.url);
@@ -12,6 +14,11 @@ export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult })
   const headers = Object.entries(page?.headers ?? {});
   const canonical = facts?.canonical ?? row.canonical;
   const metaDescription = facts?.metaDescription ?? row.metaDescription;
+
+  const key = normalizeUrl(row.url);
+  const problems = result.findings
+    .filter((f) => normalizeUrl(f.url) === key || f.related.some((u) => normalizeUrl(u) === key))
+    .sort((a, b) => LEVELS.indexOf(CATALOG[a.code].level) - LEVELS.indexOf(CATALOG[b.code].level));
 
   return (
     <section aria-label={t("detail_label", { url: row.url })} tabIndex={0} className="detail">
@@ -46,6 +53,38 @@ export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult })
           )}
         </dd>
       </dl>
+      <h3>
+        {t("detail_problems")} ({problems.length})
+      </h3>
+      {problems.length === 0 ? (
+        <p>{t("detail_problems_none")}</p>
+      ) : (
+        <ul className="detail-problems">
+          {problems.map((f, i) => {
+            const level = CATALOG[f.code].level;
+            const fix = findingFix(f.code);
+            return (
+              <li key={i} className={`lv-${level}`}>
+                <p>
+                  <span className="problems-dot" aria-hidden="true" />
+                  <span className="strong">{findingTitle(f.code)}</span> <span className="dim">{levelLabel(level)}</span>
+                </p>
+                {f.detail && <p className="detail-problem-detail">{f.detail}</p>}
+                <p>
+                  <span className="dim">{t("detail_why")} : </span>
+                  {findingWhy(f.code)}
+                </p>
+                {fix && (
+                  <p>
+                    <span className="dim">{t("detail_fix")} : </span>
+                    {fix}
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       <h3>
         {t("detail_inlinks")} ({inlinks.length})
       </h3>

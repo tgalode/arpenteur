@@ -2,6 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMemo, useRef, useState } from "react";
 import { t } from "../i18n/fr";
 import { filterRows, httpTone, sortRows, statusText, type StatusClass } from "../lib/table";
+import { normalizeUrl } from "../lib/urls";
 import type { UrlRow } from "../lib/types";
 
 type Column = {
@@ -77,10 +78,12 @@ function statusLabel(c: StatusClass): string {
 export function UrlTable({
   rows,
   selectedUrl,
+  urlFilter,
   onSelect,
 }: {
   rows: UrlRow[];
   selectedUrl: string | null;
+  urlFilter: Set<string> | null;
   onSelect: (row: UrlRow) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -89,9 +92,10 @@ export function UrlTable({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const visible = useMemo(() => {
-    const filtered = filterRows(rows, { query, statusClass });
+    const scoped = urlFilter ? rows.filter((r) => urlFilter.has(normalizeUrl(r.url))) : rows;
+    const filtered = filterRows(scoped, { query, statusClass });
     return sort ? sortRows(filtered, sort.key, sort.dir) : filtered;
-  }, [rows, query, statusClass, sort]);
+  }, [rows, urlFilter, query, statusClass, sort]);
 
   const virtualizer = useVirtualizer({
     count: visible.length,
@@ -197,7 +201,7 @@ export function UrlTable({
               );
             })}
           </div>
-          {visible.length === 0 && <p className="dim urltable-empty">{t("noRows")}</p>}
+          {visible.length === 0 && <p className="dim urltable-empty">{urlFilter ? t("noRowsProblem") : t("noRows")}</p>}
         </div>
       </div>
     </div>

@@ -563,3 +563,140 @@ select {
 .detail li > span:first-child {
   color: var(--strong);
 }
+
+/* ---- Problèmes ---- */
+
+.crawl-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.crawl-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.problems {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  background: var(--side);
+}
+
+.problems-title {
+  margin-bottom: 8px;
+  color: var(--dim);
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.problems-title em,
+.problems-level em {
+  color: var(--strong);
+  font-style: normal;
+}
+
+.problems-level {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--strong);
+  font-size: inherit;
+  font-weight: 400;
+}
+
+.problems-level em {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.lv-haute {
+  --lv: var(--err);
+}
+
+.lv-moyenne {
+  --lv: var(--warn);
+}
+
+.lv-basse {
+  --lv: var(--dim);
+}
+
+.lv-info {
+  --lv: var(--redir);
+}
+
+.problems-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--lv);
+}
+
+.problems-list {
+  padding: 0;
+  list-style: none;
+}
+
+.problems-code {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 4px 2px 14px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  text-align: left;
+}
+
+.problems-code:hover {
+  color: var(--strong);
+}
+
+.problems-code[aria-pressed="true"] {
+  background: var(--sel);
+  color: var(--strong);
+}
+
+.problems-code .n {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.problems-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 9px 12px 0;
+  color: var(--accent);
+}
+
+.problems-filter .btn {
+  padding: 1px 8px;
+}
+
+.detail-problems li {
+  margin-bottom: 6px;
+}
+
+.detail-problems li > p:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-problem-detail {
+  color: var(--strong);
+}

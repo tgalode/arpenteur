@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
-import type { CrawlMeta, CrawlResult, CrawlStatus, Progress, UrlRow } from "../lib/types";
+import type { CrawlMeta, CrawlResult, CrawlStatus, Finding, Progress, UrlRow } from "../lib/types";
 
 vi.mock("../lib/api", () => ({
   startCrawl: vi.fn(),
@@ -270,4 +270,89 @@ test("le tableau ne rend qu’une fenêtre de lignes", async () => {
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
   await screen.findByText("https://exemple.fr/p0");
   expect(screen.getAllByRole("row").length).toBeLessThan(200);
+});
+
+function withFindings(findings: Finding[], startUrl?: string): CrawlResult {
+  const r = result({ kind: "completed" });
+  r.findings = findings;
+  if (startUrl) r.meta.startUrl = startUrl;
+  return r;
+}
+
+const TARIFS_FINDINGS: Finding[] = [
+  { code: "metaDescriptionTooShort", url: "https://exemple.fr/tarifs", related: [], detail: "42 caractères" },
+  { code: "sitemapNotFound", url: "https://exemple.fr/", related: [], detail: null },
+];
+
+test("un clic sur un code filtre le tableau sur ses URL", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(withFindings(TARIFS_FINDINGS));
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByText("https://exemple.fr/tarifs");
+  expect(screen.getAllByRole("row")).toHaveLength(3);
+  await userEvent.click(screen.getByRole("button", { name: "Meta description trop courte (moins de 70 caractères), 1" }));
+  expect(screen.getAllByRole("row")).toHaveLength(2);
+  expect(firstDataRowUrl()).toBe("https://exemple.fr/tarifs");
+  const filter = screen.getByRole("status", { name: "filtre actif" });
+  expect(filter.textContent).toContain("Meta description trop courte");
+  await userEvent.click(screen.getByRole("button", { name: "retirer le filtre" }));
+  expect(screen.getAllByRole("row")).toHaveLength(3);
+  expect(screen.queryByRole("status", { name: "filtre actif" })).toBeNull();
+});
+
+test("les URL liées d’un constat entrent dans le filtre", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(
+    withFindings([
+      {
+        code: "duplicateContent",
+        url: "https://exemple.fr/",
+        related: ["https://exemple.fr/tarifs", "https://autre.fr/hors-crawl"],
+        detail: null,
+      },
+    ]),
+  );
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByText("https://exemple.fr/tarifs");
+  await userEvent.click(screen.getByRole("button", { name: /^Contenu identique/ }));
+  expect(screen.getAllByRole("row")).toHaveLength(3);
+});
+
+test("un constat de site filtre sur l’URL de départ, écrite autrement que la ligne", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(
+    withFindings([{ code: "sitemapNotFound", url: "https://Exemple.FR", related: [], detail: null }], "https://Exemple.FR"),
+  );
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByText("https://exemple.fr/tarifs");
+  await userEvent.click(screen.getByRole("button", { name: /^Aucun sitemap/ }));
+  expect(screen.getAllByRole("row")).toHaveLength(2);
+  expect(firstDataRowUrl()).toBe("https://exemple.fr/");
+});
+
+test("un constat de site sans ligne correspondante explique le tableau vide", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(
+    withFindings([{ code: "httpsInvalid", url: "http://exemple.fr/", related: [], detail: null }], "http://exemple.fr/"),
+  );
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByText("https://exemple.fr/tarifs");
+  await userEvent.click(screen.getByRole("button", { name: /^Certificat HTTPS invalide/ }));
+  expect(screen.getByText(/le filtre de problème est actif/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "retirer le filtre" })).toBeTruthy();
+});
+
+test("le détail d’une URL liste ses problèmes avec le pourquoi et la correction", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(withFindings(TARIFS_FINDINGS));
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await userEvent.click(await screen.findByRole("row", { name: /tarifs/ }));
+  const detail = screen.getByRole("region", { name: "détail de https://exemple.fr/tarifs" });
+  expect(within(detail).getByText("Meta description trop courte (moins de 70 caractères)")).toBeTruthy();
+  expect(within(detail).getByText("L'extrait donne peu envie de cliquer.")).toBeTruthy();
+  expect(within(detail).getByText("La compléter.")).toBeTruthy();
+  expect(within(detail).getByText("42 caractères")).toBeTruthy();
+  expect(within(detail).queryByText(/Sitemap/)).toBeNull();
+});
+
+test("le détail d’une URL sans problème l’indique", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(withFindings([]));
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await userEvent.click(await screen.findByRole("row", { name: /tarifs/ }));
+  expect(screen.getByText("aucun problème sur cette URL.")).toBeTruthy();
 });

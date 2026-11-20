@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ProblemsPanel } from "../components/ProblemsPanel";
 import { UrlDetail } from "../components/UrlDetail";
 import { UrlTable } from "../components/UrlTable";
 import { formatElapsed, t } from "../i18n/fr";
 import { loadCrawl, onFinished, onProgress, startCrawl, stopCrawl } from "../lib/api";
+import { findingTitle } from "../lib/catalog";
 import { statusTone } from "../lib/table";
-import type { CrawlResult, CrawlStatus, Progress, UrlRow } from "../lib/types";
+import { normalizeUrl } from "../lib/urls";
+import type { CrawlResult, CrawlStatus, FindingCode, Progress, UrlRow } from "../lib/types";
 
 function banner(status: CrawlStatus): string | null {
   switch (status.kind) {
@@ -35,6 +38,7 @@ export function Crawl({
   const [progress, setProgress] = useState<Progress | null>(null);
   const [result, setResult] = useState<CrawlResult | null>(null);
   const [selected, setSelected] = useState<UrlRow | null>(null);
+  const [selectedCode, setSelectedCode] = useState<FindingCode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [restarting, setRestarting] = useState(false);
   const finished = useRef(false);
@@ -101,6 +105,18 @@ export function Crawl({
   const progressParts = t("progress", { elapsed: progress ? formatElapsed(progress.elapsedMs) : "" }).split("{done}");
   const message = result ? banner(result.meta.status) : null;
 
+  const urlFilter = useMemo(() => {
+    if (!result || !selectedCode) return null;
+    const known = new Set(result.rows.map((r) => normalizeUrl(r.url)));
+    const urls = new Set<string>();
+    for (const f of result.findings) {
+      if (f.code !== selectedCode) continue;
+      urls.add(normalizeUrl(f.url));
+      for (const u of f.related) if (known.has(normalizeUrl(u))) urls.add(normalizeUrl(u));
+    }
+    return urls;
+  }, [result, selectedCode]);
+
   async function restart() {
     if (!result) return;
     setRestarting(true);
@@ -164,8 +180,26 @@ export function Crawl({
               {message}
             </p>
           )}
-          <UrlTable rows={result.rows} selectedUrl={selected?.url ?? null} onSelect={setSelected} />
-          {selected && <UrlDetail row={selected} result={result} />}
+          <div className="crawl-body">
+            <ProblemsPanel findings={result.findings} selectedCode={selectedCode} onSelect={setSelectedCode} />
+            <div className="crawl-main">
+              {selectedCode && (
+                <p role="status" aria-label={t("problems_filter_label")} className="problems-filter">
+                  <span>{t("problems_filter_text", { title: findingTitle(selectedCode) })}</span>
+                  <button type="button" className="btn" onClick={() => setSelectedCode(null)}>
+                    {t("problems_filter_clear")}
+                  </button>
+                </p>
+              )}
+              <UrlTable
+                rows={result.rows}
+                selectedUrl={selected?.url ?? null}
+                urlFilter={urlFilter}
+                onSelect={setSelected}
+              />
+              {selected && <UrlDetail row={selected} result={result} />}
+            </div>
+          </div>
         </>
       )}
     </main>
