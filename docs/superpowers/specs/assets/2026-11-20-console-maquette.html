@@ -1,0 +1,124 @@
+<style>
+  .cv { --bg:#0d0f12; --panel:#111418; --side:#0f1216; --line:#22262d; --line2:#161a1f; --field:#2d333b;
+        --text:#c9d1d9; --strong:#e6edf3; --dim:#7d8590; --accent:#a3e635; --accent-ink:#0d0f12;
+        --ok:#7ee787; --redir:#79c0ff; --warn:#e3b341; --ko:#ff7b72; --sel:#1b2a12;
+        background:var(--bg); color:var(--text); font-family:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+        font-size:11.5px; line-height:1.4; border:1px solid var(--line); border-radius:10px; overflow:hidden; width:920px; }
+  .cv-frame { padding:14px; overflow-x:auto; }
+  .cv-top { display:flex; align-items:center; gap:10px; padding:9px 14px; border-bottom:1px solid var(--line); background:var(--panel); }
+  .cv-logo { color:var(--accent); font-weight:700; }
+  .cv-back { color:var(--dim); }
+  .cv-url { flex:1; max-width:360px; padding:5px 9px; border:1px solid var(--field); border-radius:4px; color:var(--strong); }
+  .cv-url::before { content:"› "; color:var(--accent); }
+  .cv-btn { padding:5px 11px; border-radius:4px; border:1px solid var(--field); }
+  .cv-btn.p { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:700; }
+  .cv-prog { margin-left:auto; color:var(--dim); display:flex; align-items:center; gap:8px; }
+  .cv-prog em { color:var(--accent); font-style:normal; }
+  .cv-spin { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px rgba(163,230,53,.18); }
+  .cv-body { display:grid; grid-template-columns:200px 1fr; height:330px; }
+  .cv-side { border-right:1px solid var(--line); background:var(--side); padding:12px; }
+  .cv-h { color:var(--dim); margin:0 0 8px; font-weight:500; }
+  .cv-grp { display:flex; justify-content:space-between; padding:3px 0; }
+  .cv-it { display:flex; justify-content:space-between; padding:2px 0 2px 12px; color:var(--dim); }
+  .cv-main { display:grid; grid-template-rows:auto auto 1fr auto; min-height:0; }
+  .cv-banner { margin:10px 12px 0; padding:7px 10px; border:1px solid rgba(227,179,65,.4); background:rgba(227,179,65,.08); color:var(--warn); border-radius:4px; }
+  .cv-tools { display:flex; gap:8px; padding:9px 12px 7px; color:var(--dim); }
+  .cv-search { flex:1; padding:4px 8px; border:1px solid var(--field); border-radius:4px; }
+  .cv-wrap { margin:0 12px; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+  .cv table { width:100%; border-collapse:collapse; }
+  .cv th, .cv td { text-align:left; white-space:nowrap; padding:5px 9px; }
+  .cv th { color:var(--dim); font-weight:500; border-bottom:1px solid var(--line); background:var(--panel); }
+  .cv th.sort { color:var(--strong); } .cv th.sort::after { content:" ↓"; color:var(--accent); }
+  .cv td { border-bottom:1px solid var(--line2); }
+  .cv tr.sel td { background:var(--sel); }
+  .n { text-align:right !important; font-variant-numeric:tabular-nums; }
+  .ok{color:var(--ok)} .rd{color:var(--redir)} .ko{color:var(--ko)} .dim{color:var(--dim)} .wn{color:var(--warn)} .st{color:var(--strong)}
+  .cv-det { margin:8px 12px 12px; padding:8px 10px; border:1px solid var(--line); border-radius:4px; color:var(--dim); display:grid; grid-template-columns:110px 1fr; gap:3px 12px; }
+  .cv-det span:nth-child(even) { color:var(--strong); }
+  /* accueil */
+  .cv-home { padding:16px 18px; height:330px; }
+  .cv-new { display:flex; gap:10px; align-items:center; margin-bottom:18px; }
+  .cv-site { border:1px solid var(--line); border-radius:4px; margin-bottom:10px; }
+  .cv-site-h { display:flex; justify-content:space-between; padding:7px 10px; background:var(--panel); border-bottom:1px solid var(--line); }
+  .cv-row { display:grid; grid-template-columns:170px 160px 1fr auto; gap:10px; padding:5px 10px; border-bottom:1px solid var(--line2); }
+  .cv-row:last-child { border-bottom:0; }
+  .cv-lbl { font-family:-apple-system, "Segoe UI", sans-serif; font-size:12px; color:#9aa3ad; margin:18px 0 8px; }
+</style>
+
+<h2>Direction « Console » : les deux écrans</h2>
+<p class="subtitle">Interface en français, en minuscules comme une console. Police JetBrains Mono embarquée (même rendu sur Mac et Windows). Dis-moi ce qui ne va pas.</p>
+
+<div class="cv-lbl">Accueil</div>
+<div class="cv-frame">
+  <div class="cv">
+    <div class="cv-top"><span class="cv-logo">arpenteur</span><span class="dim">v0.1</span></div>
+    <div class="cv-home">
+      <div class="cv-new"><span class="cv-url">exemple.fr</span><span class="cv-btn p">lancer</span><span class="dim">1 connexion · 2 req/s · robots.txt respecté</span></div>
+      <div class="cv-h"># sites</div>
+      <div class="cv-site">
+        <div class="cv-site-h"><span class="st">www.crocweb.fr</span><span class="dim">3 crawls</span></div>
+        <div class="cv-row"><span>20/11/2026 15:42</span><span class="ok">terminé</span><span class="dim">63 URL</span><span class="dim">ouvrir ›</span></div>
+        <div class="cv-row"><span>20/11/2026 15:31</span><span class="wn">arrêté</span><span class="dim">18 URL</span><span class="dim">ouvrir ›</span></div>
+        <div class="cv-row"><span>20/11/2026 13:53</span><span class="ko">échec · interrompu</span><span class="dim">0 URL</span><span class="dim">ouvrir ›</span></div>
+      </div>
+      <div class="cv-site">
+        <div class="cv-site-h"><span class="st">www.croustille.fr</span><span class="dim">1 crawl</span></div>
+        <div class="cv-row"><span>20/11/2026 16:05</span><span class="rd">● en cours</span><span class="dim">58 URL</span><span class="dim">ouvrir ›</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="cv-lbl">Crawl en cours</div>
+<div class="cv-frame">
+  <div class="cv">
+    <div class="cv-top">
+      <span class="cv-back">‹ retour</span><span class="cv-logo">arpenteur</span>
+      <span class="cv-url">https://www.crocweb.fr/</span>
+      <span class="cv-btn">arrêter</span>
+      <span class="cv-prog"><span class="cv-spin"></span><em>142</em> URL traitées · 1 min 12 s</span>
+    </div>
+    <div class="cv-body">
+      <div class="cv-side">
+        <div class="cv-h"># problèmes</div>
+        <div class="dim">au plan 2</div>
+      </div>
+      <div class="cv-main">
+        <div></div>
+        <div class="cv-tools"><span class="cv-search">/ filtrer url, title, h1…</span><span>statut : tous ▾</span></div>
+        <div class="cv-wrap">
+          <table>
+            <tr><th>url</th><th>statut</th><th>type</th><th>title</th><th>indexable</th><th class="n sort">prof.</th><th class="n">liens entr.</th><th class="n">mots</th></tr>
+            <tr><td>/</td><td class="ok">200</td><td class="dim">html</td><td>CrocWeb · Agence Web Rennes</td><td class="ok">oui</td><td class="n">0</td><td class="n">12</td><td class="n">860</td></tr>
+            <tr class="sel"><td>/tarifs</td><td class="ok">200</td><td class="dim">html</td><td>Tarifs CrocWeb · Offres…</td><td class="ko">non</td><td class="n">1</td><td class="n">9</td><td class="n">640</td></tr>
+            <tr><td>/nos-offres</td><td class="ok">200</td><td class="dim">html</td><td>Nos offres · CrocWeb</td><td class="ko">non</td><td class="n">1</td><td class="n">9</td><td class="n">520</td></tr>
+            <tr><td>crocweb.fr/</td><td class="rd">307</td><td class="dim">redirect</td><td class="dim">–</td><td class="ko">non</td><td class="n">0</td><td class="n">0</td><td class="n dim">–</td></tr>
+            <tr><td>/img/logo.png</td><td class="ok">200</td><td class="dim">image</td><td class="dim">–</td><td class="dim">–</td><td class="n dim">–</td><td class="n">1</td><td class="n dim">–</td></tr>
+            <tr><td>/_vercel/insights/script.js</td><td class="ko">404</td><td class="dim">html</td><td class="dim">–</td><td class="ko">non</td><td class="n">2</td><td class="n">1</td><td class="n dim">–</td></tr>
+          </table>
+        </div>
+        <div class="cv-det">
+          <span>url</span><span>https://www.crocweb.fr/tarifs</span>
+          <span>canonical</span><span>https://crocweb.fr/tarifs <span class="rd">307</span></span>
+          <span>liens entrants</span><span>9 · « Tarifs » depuis /, /nos-offres, /faq…</span>
+          <span>json-ld</span><span>FAQPage, Organization</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="cv-lbl">Crawl terminé, interrompu par le site</div>
+<div class="cv-frame">
+  <div class="cv">
+    <div class="cv-top">
+      <span class="cv-back">‹ retour</span><span class="cv-logo">arpenteur</span>
+      <span class="cv-url">https://www.exemple.fr/</span>
+      <span class="cv-btn p">relancer</span>
+      <span class="cv-prog"><span class="wn">■</span> 37 URL · 22 s</span>
+    </div>
+    <div style="padding:0 0 12px">
+      <div class="cv-banner">! crawl interrompu : le site limite les requêtes. baissez le débit et relancez.</div>
+    </div>
+  </div>
+</div>
