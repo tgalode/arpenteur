@@ -10,9 +10,11 @@ vi.mock("../lib/api", () => ({
   loadCrawl: vi.fn(),
   onProgress: vi.fn(),
   onFinished: vi.fn(),
+  exportCsv: vi.fn(),
 }));
 
 import * as api from "../lib/api";
+import { problemsCsv, urlsCsv } from "../lib/csv";
 import { Crawl } from "./Crawl";
 
 let progressCb: (p: Progress) => void = () => {};
@@ -355,4 +357,55 @@ test("le détail d’une URL sans problème l’indique", async () => {
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
   await userEvent.click(await screen.findByRole("row", { name: /tarifs/ }));
   expect(screen.getByText("aucun problème sur cette URL.")).toBeTruthy();
+});
+
+test("les boutons d’export n’apparaissent qu’avec un résultat chargé", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
+  const { unmount } = render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByRole("button", { name: "arrêter" });
+  expect(screen.queryByRole("button", { name: "exporter les URL" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "exporter les problèmes" })).toBeNull();
+  unmount();
+
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  expect(await screen.findByRole("button", { name: "exporter les URL" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "exporter les problèmes" })).toBeTruthy();
+});
+
+test("exporter les URL propose <domaine>-<id>-urls.csv avec toutes les lignes", async () => {
+  const r = result({ kind: "completed" });
+  vi.mocked(api.loadCrawl).mockResolvedValue(r);
+  vi.mocked(api.exportCsv).mockResolvedValue(true);
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await userEvent.click(await screen.findByRole("button", { name: "exporter les URL" }));
+  expect(api.exportCsv).toHaveBeenCalledWith("exemple.fr-abc-urls.csv", urlsCsv(r.rows));
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("exporter les problèmes propose <domaine>-<id>-problemes.csv", async () => {
+  const r = result({ kind: "completed" });
+  r.findings = [{ code: "titleMissing", url: "https://exemple.fr/", related: [], detail: null }];
+  vi.mocked(api.loadCrawl).mockResolvedValue(r);
+  vi.mocked(api.exportCsv).mockResolvedValue(true);
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await userEvent.click(await screen.findByRole("button", { name: "exporter les problèmes" }));
+  expect(api.exportCsv).toHaveBeenCalledWith("exemple.fr-abc-problemes.csv", problemsCsv(r.findings));
+});
+
+test("un export en échec affiche l’erreur", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
+  vi.mocked(api.exportCsv).mockRejectedValue("impossible d’écrire le fichier : disque plein");
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await userEvent.click(await screen.findByRole("button", { name: "exporter les URL" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("disque plein");
+});
+
+test("une boîte de dialogue annulée n’affiche rien", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
+  vi.mocked(api.exportCsv).mockResolvedValue(false);
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await userEvent.click(await screen.findByRole("button", { name: "exporter les URL" }));
+  await waitFor(() => expect(api.exportCsv).toHaveBeenCalled());
+  expect(screen.queryByRole("alert")).toBeNull();
 });

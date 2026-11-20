@@ -3,8 +3,9 @@ import { ProblemsPanel } from "../components/ProblemsPanel";
 import { UrlDetail } from "../components/UrlDetail";
 import { UrlTable } from "../components/UrlTable";
 import { formatElapsed, t } from "../i18n/fr";
-import { loadCrawl, onFinished, onProgress, startCrawl, stopCrawl } from "../lib/api";
+import { exportCsv, loadCrawl, onFinished, onProgress, startCrawl, stopCrawl } from "../lib/api";
 import { findingTitle } from "../lib/catalog";
+import { problemsCsv, urlsCsv } from "../lib/csv";
 import { statusTone } from "../lib/table";
 import { normalizeUrl } from "../lib/urls";
 import type { CrawlResult, CrawlStatus, FindingCode, Progress, UrlRow } from "../lib/types";
@@ -129,6 +130,15 @@ export function Crawl({
     }
   }
 
+  async function exportFile(suffix: "urls" | "problemes", contents: string) {
+    setError(null);
+    try {
+      await exportCsv(`${domain}-${id}-${suffix}.csv`, contents);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   return (
     <main className="crawl">
       <header className="topbar">
@@ -140,9 +150,21 @@ export function Crawl({
           {result?.meta.startUrl ?? domain}
         </span>
         {result ? (
-          <button type="button" className="btn btn-primary" disabled={restarting} onClick={() => void restart()}>
-            {t("restart")}
-          </button>
+          <>
+            <button type="button" className="btn" onClick={() => void exportFile("urls", urlsCsv(result.rows))}>
+              {t("export_urls")}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void exportFile("problemes", problemsCsv(result.findings))}
+            >
+              {t("export_problems")}
+            </button>
+            <button type="button" className="btn btn-primary" disabled={restarting} onClick={() => void restart()}>
+              {t("restart")}
+            </button>
+          </>
         ) : (
           running && (
             <>

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
 import type {
   CrawlMeta,
   CrawlResult,
@@ -23,6 +24,14 @@ export function listSites(): Promise<SiteSummary[]> {
 
 export function loadCrawl(domain: string, id: string): Promise<CrawlResult> {
   return invoke<CrawlResult>("load_crawl", { domain, id });
+}
+
+/** Ouvre « Enregistrer sous » puis écrit le fichier. `false` si l'utilisateur annule. */
+export async function exportCsv(defaultName: string, contents: string): Promise<boolean> {
+  const path = await save({ defaultPath: defaultName, filters: [{ name: "CSV", extensions: ["csv"] }] });
+  if (path === null) return false;
+  await invoke<void>("export_file", { path, contents });
+  return true;
 }
 
 export function onProgress(cb: (p: Progress) => void): Promise<UnlistenFn> {

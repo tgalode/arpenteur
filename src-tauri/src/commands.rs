@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use arpenteur_core::engine::run_crawl;
@@ -106,4 +107,54 @@ pub fn load_crawl(
         .store
         .load_result(&domain, &id)
         .map_err(|e| e.to_string())
+}
+
+fn has_csv_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("csv"))
+}
+
+/// Écrit exactement `contents` (BOM compris) dans un fichier `.csv`.
+#[tauri::command]
+pub fn export_file(path: String, contents: String) -> Result<(), String> {
+    let path = Path::new(&path);
+    if !has_csv_extension(path) {
+        return Err("seuls les fichiers .csv peuvent être exportés".to_string());
+    }
+    std::fs::write(path, contents.as_bytes())
+        .map_err(|e| format!("impossible d’écrire le fichier : {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn export_file_rejects_other_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.txt", "a", "a.csv.exe", "a.csvx"] {
+            let path = dir.path().join(name);
+            let err = export_file(path.to_string_lossy().into_owned(), "x".into()).unwrap_err();
+            assert!(err.contains(".csv"), "{err}");
+            assert!(!path.exists());
+        }
+    }
+
+    #[test]
+    fn export_file_writes_exact_bytes_for_csv_in_any_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.CSV");
+        let contents = "\u{FEFF}a;b\r\n1;2";
+        export_file(path.to_string_lossy().into_owned(), contents.into()).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), contents.as_bytes());
+    }
+
+    #[test]
+    fn export_file_reports_write_failure_in_french() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("absent").join("a.csv");
+        let err = export_file(path.to_string_lossy().into_owned(), "x".into()).unwrap_err();
+        assert!(err.starts_with("impossible d’écrire"), "{err}");
+    }
 }
