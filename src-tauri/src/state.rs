@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use arpenteur_core::storage::CrawlStore;
 use tokio_util::sync::CancellationToken;
@@ -9,6 +9,7 @@ pub struct AppState {
     pub store: CrawlStore,
     running: Mutex<Option<(u64, CancellationToken)>>,
     next_id: AtomicU64,
+    exiting: AtomicBool,
 }
 
 /// Crawl accepté par `try_begin` : `id` sert à `finish`, `token` à l'annuler.
@@ -21,12 +22,21 @@ pub struct RunningCrawl {
 #[derive(Debug, PartialEq, Eq)]
 pub struct AlreadyRunning;
 
+/// Suite à donner à une demande de fermeture de l'application.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ExitDecision {
+    Allow,
+    /// Un arrêt du crawl vient d'être demandé : retenir la sortie.
+    WaitForCrawl,
+}
+
 impl AppState {
     pub fn new(store: CrawlStore) -> Self {
         Self {
             store,
             running: Mutex::new(None),
             next_id: AtomicU64::new(0),
+            exiting: AtomicBool::new(false),
         }
     }
 
@@ -51,6 +61,24 @@ impl AppState {
             }
             None => false,
         }
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.running
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
+    }
+
+    /// Premier ExitRequested pendant un crawl : l'arrête et retient la sortie.
+    /// Tout autre cas laisse sortir (aucun crawl, sortie déjà en cours).
+    pub fn on_exit_requested(&self) -> ExitDecision {
+        if self.exiting.load(Ordering::SeqCst) || !self.is_running() {
+            return ExitDecision::Allow;
+        }
+        self.exiting.store(true, Ordering::SeqCst);
+        self.stop();
+        ExitDecision::WaitForCrawl
     }
 
     /// Libère l'état seulement si `id` est encore le crawl courant.
@@ -129,5 +157,30 @@ mod tests {
         assert_eq!(state.try_begin().unwrap_err(), AlreadyRunning);
         assert!(state.stop());
         assert!(b.token.is_cancelled());
+    }
+
+    #[test]
+    fn is_running_follows_begin_and_finish() {
+        let (state, _dir) = state();
+        assert!(!state.is_running());
+        let crawl = state.try_begin().unwrap();
+        assert!(state.is_running());
+        state.finish(crawl.id);
+        assert!(!state.is_running());
+    }
+
+    #[test]
+    fn exit_is_allowed_without_crawl() {
+        let (state, _dir) = state();
+        assert_eq!(state.on_exit_requested(), ExitDecision::Allow);
+    }
+
+    #[test]
+    fn exit_during_crawl_stops_it_then_second_request_allows() {
+        let (state, _dir) = state();
+        let crawl = state.try_begin().unwrap();
+        assert_eq!(state.on_exit_requested(), ExitDecision::WaitForCrawl);
+        assert!(crawl.token.is_cancelled());
+        assert_eq!(state.on_exit_requested(), ExitDecision::Allow);
     }
 }
