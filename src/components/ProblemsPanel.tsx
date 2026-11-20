@@ -1,9 +1,7 @@
 import { Fragment } from "react";
 import { t, type FrKey } from "../i18n/fr";
-import { CATALOG, findingTitle, type Level } from "../lib/catalog";
+import { CATALOG, findingTitle, LEVELS, type Level } from "../lib/catalog";
 import type { Finding, FindingCode } from "../lib/types";
-
-export const LEVELS: Level[] = ["haute", "moyenne", "basse", "info"];
 
 export function levelLabel(level: Level): string {
   return t(`level_${level}` as FrKey);

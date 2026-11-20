@@ -1,8 +1,37 @@
 import { t } from "../i18n/fr";
-import { CATALOG, findingFix, findingTitle, findingWhy } from "../lib/catalog";
+import { CATALOG, findingFix, findingTitle, findingWhy, LEVELS } from "../lib/catalog";
 import { normalizeUrl } from "../lib/urls";
-import type { CrawlResult, UrlRow } from "../lib/types";
-import { LEVELS, levelLabel } from "./ProblemsPanel";
+import type { CrawlResult, Finding, FindingCode, UrlRow } from "../lib/types";
+import { levelLabel } from "./ProblemsPanel";
+
+// Codes dont les URL liées sont les pages qui portent le problème (le constat est sur la cible).
+// Pour tous les autres, les URL liées sont l'autre bout du constat : elles n'en héritent pas.
+const CARRIER_CODES: Partial<Record<FindingCode, "detail_problem_link_to" | "detail_problem_image">> = {
+  brokenInternalLink: "detail_problem_link_to",
+  imageTooHeavy: "detail_problem_image",
+};
+
+interface Problem {
+  finding: Finding;
+  /** Adresse à montrer quand le constat est porté par une autre URL que la ligne. */
+  target: string | null;
+}
+
+function problemsOf(url: string, findings: Finding[]): Problem[] {
+  const key = normalizeUrl(url);
+  const seen = new Set<string>();
+  const out: Problem[] = [];
+  for (const finding of findings) {
+    const own = normalizeUrl(finding.url) === key;
+    const carried = !own && finding.code in CARRIER_CODES && finding.related.some((u) => normalizeUrl(u) === key);
+    if (!own && !carried) continue;
+    const id = `${finding.code}|${normalizeUrl(finding.url)}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ finding, target: carried ? finding.url : null });
+  }
+  return out.sort((a, b) => LEVELS.indexOf(CATALOG[a.finding.code].level) - LEVELS.indexOf(CATALOG[b.finding.code].level));
+}
 
 export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult }) {
   const page = result.pages.find((p) => p.url === row.url);
@@ -15,10 +44,7 @@ export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult })
   const canonical = facts?.canonical ?? row.canonical;
   const metaDescription = facts?.metaDescription ?? row.metaDescription;
 
-  const key = normalizeUrl(row.url);
-  const problems = result.findings
-    .filter((f) => normalizeUrl(f.url) === key || f.related.some((u) => normalizeUrl(u) === key))
-    .sort((a, b) => LEVELS.indexOf(CATALOG[a.code].level) - LEVELS.indexOf(CATALOG[b.code].level));
+  const problems = problemsOf(row.url, result.findings);
 
   return (
     <section aria-label={t("detail_label", { url: row.url })} tabIndex={0} className="detail">
@@ -60,7 +86,7 @@ export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult })
         <p>{t("detail_problems_none")}</p>
       ) : (
         <ul className="detail-problems">
-          {problems.map((f, i) => {
+          {problems.map(({ finding: f, target }, i) => {
             const level = CATALOG[f.code].level;
             const fix = findingFix(f.code);
             return (
@@ -69,6 +95,9 @@ export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult })
                   <span className="problems-dot" aria-hidden="true" />
                   <span className="strong">{findingTitle(f.code)}</span> <span className="dim">{levelLabel(level)}</span>
                 </p>
+                {target && (
+                  <p className="detail-problem-detail">{t(CARRIER_CODES[f.code]!, { url: target })}</p>
+                )}
                 {f.detail && <p className="detail-problem-detail">{f.detail}</p>}
                 <p>
                   <span className="dim">{t("detail_why")} : </span>

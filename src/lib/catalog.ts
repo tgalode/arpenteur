@@ -3,6 +3,9 @@ import type { FindingCode } from "./types";
 
 export type Level = "haute" | "moyenne" | "basse" | "info";
 
+/** Du plus grave au moins grave. */
+export const LEVELS: Level[] = ["haute", "moyenne", "basse", "info"];
+
 export const CATALOG: Record<FindingCode, { level: Level }> = {
   brokenInternalLink: { level: "haute" },
   serverError: { level: "haute" },

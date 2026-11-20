@@ -244,7 +244,9 @@ test("relancer démarre un crawl sur la même URL et l’ouvre", async () => {
   const onOpen = vi.fn();
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={onOpen} />);
   await userEvent.click(await screen.findByRole("button", { name: "relancer" }));
-  expect(api.startCrawl).toHaveBeenCalledWith("https://exemple.fr/", meta({ kind: "completed" }).settings);
+  // Sans réglages : le backend applique les réglages enregistrés, pas ceux de l'ancien crawl.
+  expect(api.startCrawl).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(api.startCrawl).mock.calls[0]).toEqual(["https://exemple.fr/"]);
   await waitFor(() => expect(onOpen).toHaveBeenCalledWith("exemple.fr", "nouvel-id", true));
 });
 

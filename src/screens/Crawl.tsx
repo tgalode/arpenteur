@@ -122,7 +122,7 @@ export function Crawl({
     if (!result) return;
     setRestarting(true);
     try {
-      const started = await startCrawl(result.meta.startUrl, result.meta.settings);
+      const started = await startCrawl(result.meta.startUrl);
       onOpen(started.domain, started.id, true);
     } catch (e) {
       setError(String(e));

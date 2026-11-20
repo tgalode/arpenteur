@@ -82,3 +82,31 @@ test("la protection s’applique aux deux exports", () => {
   expect(urlsCsv([row({ title: "=1+1" })])).toContain(";'=1+1;");
   expect(problemsCsv([finding({ detail: "@cmd" })])).toContain(";'@cmd;");
 });
+
+test("problemsCsv trie par niveau, puis par code du catalogue, puis par URL", () => {
+  const csv = problemsCsv([
+    finding({ code: "canonicalToOtherUrl", url: "https://exemple.fr/z" }),
+    finding({ code: "titleTooLong", url: "https://exemple.fr/b" }),
+    finding({ code: "canonicalMissing", url: "https://exemple.fr/b" }),
+    finding({ code: "titleMissing", url: "https://exemple.fr/b" }),
+    finding({ code: "canonicalMissing", url: "https://exemple.fr/a" }),
+    finding({ code: "brokenInternalLink", url: "https://exemple.fr/m" }),
+    finding({ code: "titleMissing", url: "https://exemple.fr/a" }),
+  ]);
+  const lines = csv.slice(1).split("\r\n").slice(1);
+  expect(lines.map((l) => l.split(";").slice(0, 2).concat(l.split(";")[3]).join(" "))).toEqual([
+    "haute brokenInternalLink https://exemple.fr/m",
+    "haute titleMissing https://exemple.fr/a",
+    "haute titleMissing https://exemple.fr/b",
+    "moyenne canonicalMissing https://exemple.fr/a",
+    "moyenne canonicalMissing https://exemple.fr/b",
+    "basse titleTooLong https://exemple.fr/b",
+    "information canonicalToOtherUrl https://exemple.fr/z",
+  ]);
+});
+
+test("problemsCsv ne modifie pas la liste reçue", () => {
+  const findings = [finding({ code: "canonicalMissing" }), finding({ code: "titleMissing" })];
+  problemsCsv(findings);
+  expect(findings.map((f) => f.code)).toEqual(["canonicalMissing", "titleMissing"]);
+});

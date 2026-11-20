@@ -1,5 +1,6 @@
 import { t } from "../i18n/fr";
-import { CATALOG, findingTitle } from "./catalog";
+import { CATALOG, findingTitle, LEVELS } from "./catalog";
+import codes from "./finding-codes.json";
 import { statusText } from "./table";
 import type { Finding, UrlRow } from "./types";
 
@@ -52,10 +53,21 @@ export function urlsCsv(rows: UrlRow[]): string {
   );
 }
 
+const CODE_ORDER = new Map((codes as string[]).map((code, i) => [code, i]));
+
+/** Niveau (haute en premier), puis ordre du catalogue, puis URL : un tri Excel sur « niveau » reste lisible. */
+function byLevelCodeUrl(a: Finding, b: Finding): number {
+  return (
+    LEVELS.indexOf(CATALOG[a.code].level) - LEVELS.indexOf(CATALOG[b.code].level) ||
+    (CODE_ORDER.get(a.code) ?? 0) - (CODE_ORDER.get(b.code) ?? 0) ||
+    a.url.localeCompare(b.url)
+  );
+}
+
 export function problemsCsv(findings: Finding[]): string {
   return toCsv(
     [t("csv_level"), t("csv_code"), t("csv_problem"), t("csv_url"), t("csv_detail"), t("csv_related")],
-    findings.map((f) => [
+    [...findings].sort(byLevelCodeUrl).map((f) => [
       t(`level_${CATALOG[f.code].level}`),
       f.code,
       findingTitle(f.code),

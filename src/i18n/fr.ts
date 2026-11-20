@@ -76,6 +76,8 @@ export const fr = {
   csv_related: "URL liées",
   detail_problems: "problèmes",
   detail_problems_none: "aucun problème sur cette URL.",
+  detail_problem_link_to: "vers {url}",
+  detail_problem_image: "image {url}",
   detail_why: "pourquoi",
   detail_fix: "correction",
   finding_brokenInternalLink_title: "Lien interne cassé",
