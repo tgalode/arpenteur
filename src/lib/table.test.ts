@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { filterRows, sortRows } from "./table";
+import { filterRows, sortRows, statusText } from "./table";
 import type { UrlRow } from "./types";
 
 function row(p: Partial<UrlRow>): UrlRow {
@@ -62,6 +62,8 @@ describe("filterRows", () => {
       row({ status: 404 }),
       row({ status: 503 }),
       row({ status: -1 }),
+      row({ status: -6 }),
+      row({ status: -2 }),
     ];
     const f = (statusClass: "all" | "2xx" | "3xx" | "4xx" | "5xx" | "error") =>
       filterRows(rows, { query: "", statusClass }).map((r) => r.status);
@@ -69,7 +71,18 @@ describe("filterRows", () => {
     expect(f("3xx")).toEqual([301]);
     expect(f("4xx")).toEqual([404]);
     expect(f("5xx")).toEqual([503]);
-    expect(f("error")).toEqual([-1]);
-    expect(f("all")).toHaveLength(5);
+    expect(f("error")).toEqual([-1, -2]);
+    expect(f("all")).toHaveLength(7);
+  });
+});
+
+describe("statusText", () => {
+  test("statusText nomme les statuts négatifs de SiteOne", () => {
+    expect(statusText(200)).toBe("200");
+    expect(statusText(404)).toBe("404");
+    expect(statusText(-1)).toBe("connexion impossible");
+    expect(statusText(-2)).toBe("délai dépassé");
+    expect(statusText(-6)).toBe("ignorée");
+    expect(statusText(-3)).toBe("erreur réseau");
   });
 });

@@ -1,4 +1,25 @@
+import { t } from "../i18n/fr";
 import type { UrlRow } from "./types";
+
+// Statuts négatifs de SiteOne (result/visited_url.rs) : aucune réponse HTTP.
+const ERROR_CONNECTION_FAIL = -1;
+const ERROR_TIMEOUT = -2;
+/** URL ignorée par SiteOne sans requête : ce n'est pas une erreur. */
+export const ERROR_SKIPPED = -6;
+
+export function statusText(status: number): string {
+  if (status >= 0) return String(status);
+  switch (status) {
+    case ERROR_SKIPPED:
+      return t("httpStatus_skipped");
+    case ERROR_CONNECTION_FAIL:
+      return t("httpStatus_connection");
+    case ERROR_TIMEOUT:
+      return t("httpStatus_timeout");
+    default:
+      return t("httpStatus_network");
+  }
+}
 
 export type StatusClass = "all" | "2xx" | "3xx" | "4xx" | "5xx" | "error";
 
@@ -31,7 +52,7 @@ function matchesStatus(status: number, cls: StatusClass): boolean {
     case "all":
       return true;
     case "error":
-      return status < 0;
+      return status < 0 && status !== ERROR_SKIPPED;
     default:
       return status >= 0 && Math.floor(status / 100) === Number(cls[0]);
   }

@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMemo, useRef, useState } from "react";
 import { t } from "../i18n/fr";
-import { filterRows, sortRows, type StatusClass } from "../lib/table";
+import { filterRows, sortRows, statusText, type StatusClass } from "../lib/table";
 import type { UrlRow } from "../lib/types";
 
 type Column = {
@@ -16,7 +16,7 @@ const text = (v: string | number | null | undefined): string =>
 
 const COLUMNS: Column[] = [
   { key: "url", label: t("col_url"), width: "3fr", render: (r) => r.url },
-  { key: "status", label: t("col_status"), width: "70px", render: (r) => (r.status < 0 ? t("none") : String(r.status)) },
+  { key: "status", label: t("col_status"), width: "140px", render: (r) => statusText(r.status) },
   { key: "contentType", label: t("col_type"), width: "1fr", render: (r) => text(r.contentType) },
   { key: "title", label: t("col_title"), width: "2fr", render: (r) => text(r.title) },
   { key: "h1", label: t("col_h1"), width: "2fr", render: (r) => text(r.h1) },

@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use siteone_crawler::result::visited_url::ERROR_SKIPPED;
 use url::Url;
 
 use crate::links::analyze_links;
@@ -16,8 +17,10 @@ fn norm(raw: &str) -> String {
     normalize_url(raw).unwrap_or_else(|| raw.to_string())
 }
 
+/// `ERROR_SKIPPED` (-6) : SiteOne n'a pas fait la requête (trop de réponses
+/// non-200 pour ce nom de fichier), ce n'est pas une erreur de la page.
 fn is_error(page: &PageRecord) -> bool {
-    page.status >= 400 || page.status < 0
+    page.status >= 400 || (page.status < 0 && page.status != ERROR_SKIPPED)
 }
 
 fn is_html_200(page: &PageRecord) -> bool {
@@ -599,6 +602,18 @@ mod tests {
             urls_of(&f, FindingCode::SitemapUrlNonIndexable),
             vec![full("/noidx")]
         );
+    }
+
+    #[test]
+    fn url_skipped_by_siteone_is_not_an_error() {
+        let pages = vec![
+            html("/").links(&["/ignoree"]).rec(),
+            other("/ignoree", -6, ""),
+            other("/ignoree-aussi", -6, ""),
+        ];
+        let f = check(&pages, &sitemap(&["/", "/ignoree-aussi"]));
+        assert!(of(&f, FindingCode::BrokenInternalLink).is_empty(), "{f:?}");
+        assert!(of(&f, FindingCode::SitemapUrlError).is_empty(), "{f:?}");
     }
 
     #[test]
