@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { t, type fr } from "../i18n/fr";
-import pkg from "../../package.json";
+import { version } from "../../package.json";
 import { listSites, startCrawl } from "../lib/api";
 import { statusTone } from "../lib/table";
 import type { CrawlMeta, SiteSummary } from "../lib/types";
@@ -50,7 +50,7 @@ export default function Home({ onOpen }: { onOpen: (domain: string, id: string, 
     <main className="home">
       <header className="topbar">
         <h1 className="logo">{t("appName")}</h1>
-        <span className="dim">v{pkg.version}</span>
+        <span className="dim">{t("version", { version })}</span>
       </header>
       <div className="home-body">
         <form className="home-new" onSubmit={submit}>
@@ -92,7 +92,7 @@ export default function Home({ onOpen }: { onOpen: (domain: string, id: string, 
                       onClick={() => onOpen(site.domain, c.id, c.status.kind === "running")}
                     >
                       <span className="crawl-date">{formatDate(c.startedAt)}</span>
-                      <span className={`crawl-status tone-${statusTone(c.status.kind)}`}>{statusLabel(c)}</span>
+                      <span className={`crawl-status tone-${statusTone(c.status.kind)}`} title={statusLabel(c)}>{statusLabel(c)}</span>
                       <span className="dim">{t("pages", { count: c.pages })}</span>
                       <span className="crawl-open dim">{t("open")}</span>
                     </button>

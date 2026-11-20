@@ -45,6 +45,8 @@ export const fr = {
   no: "non",
   none: "–",
   noRows: "aucune URL ne correspond.",
+  detail_label: "détail de {url}",
+  version: "v{version}",
   detail_canonical: "canonical",
   detail_metaDescription: "meta description",
   detail_h1: "h1",

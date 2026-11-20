@@ -98,13 +98,14 @@ export function Crawl({
     };
   }, [domain, id, running]);
 
+  const progressParts = t("progress", { elapsed: progress ? formatElapsed(progress.elapsedMs) : "" }).split("{done}");
   const message = result ? banner(result.meta.status) : null;
 
   async function restart() {
     if (!result) return;
     setRestarting(true);
     try {
-      const started = await startCrawl(result.meta.startUrl);
+      const started = await startCrawl(result.meta.startUrl, result.meta.settings);
       onOpen(started.domain, started.id, true);
     } catch (e) {
       setError(String(e));
@@ -137,8 +138,9 @@ export function Crawl({
                   <>
                     <span className="crawl-pulse" aria-hidden="true" />
                     <span data-testid="progress">
+                      {progressParts[0]}
                       <em>{progress.done}</em>
-                      {t("progress", { done: "", elapsed: formatElapsed(progress.elapsedMs) })}
+                      {progressParts[1]}
                     </span>
                   </>
                 ) : (

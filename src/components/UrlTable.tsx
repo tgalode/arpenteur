@@ -24,8 +24,9 @@ const COLUMNS: Column[] = [
   {
     key: "status",
     label: t("col_status"),
-    width: "110px",
+    width: "calc(20ch + 18px)",
     render: (r) => statusText(r.status),
+    tip: true,
     tone: (r) => `tone-${httpTone(r.status)}`,
   },
   {
@@ -54,13 +55,13 @@ const COLUMNS: Column[] = [
   {
     key: "indexable",
     label: t("col_indexable"),
-    width: "90px",
+    width: "calc(12ch + 18px)",
     render: (r) => (r.indexable ? t("yes") : t("no")),
     tone: (r) => (r.indexable ? "tone-ok" : "tone-err"),
   },
-  { key: "depth", label: t("col_depth"), width: "70px", render: (r) => text(r.depth), numeric: true, tone: (r) => (isEmpty(r.depth) ? "dim" : "") },
-  { key: "inlinks", label: t("col_inlinks"), width: "100px", render: (r) => text(r.inlinks), numeric: true, tone: (r) => (isEmpty(r.inlinks) ? "dim" : "") },
-  { key: "wordCount", label: t("col_words"), width: "70px", render: (r) => text(r.wordCount), numeric: true, tone: (r) => (isEmpty(r.wordCount) ? "dim" : "") },
+  { key: "depth", label: t("col_depth"), width: "calc(9ch + 18px)", render: (r) => text(r.depth), numeric: true, tone: (r) => (isEmpty(r.depth) ? "dim" : "") },
+  { key: "inlinks", label: t("col_inlinks"), width: "calc(14ch + 18px)", render: (r) => text(r.inlinks), numeric: true, tone: (r) => (isEmpty(r.inlinks) ? "dim" : "") },
+  { key: "wordCount", label: t("col_words"), width: "calc(8ch + 18px)", render: (r) => text(r.wordCount), numeric: true, tone: (r) => (isEmpty(r.wordCount) ? "dim" : "") },
 ];
 
 const GRID = COLUMNS.map((c) => c.width).join(" ");
@@ -129,30 +130,30 @@ export function UrlTable({
         </select>
       </div>
       <div role="table" aria-rowcount={visible.length + 1} className="urltable-table">
-        <div role="row" className="urltable-head" style={{ gridTemplateColumns: GRID }}>
-          {COLUMNS.map((c) => {
-            const active = sort?.key === c.key;
-            return (
-              <div
-                key={c.key}
-                role="columnheader"
-                className={c.numeric ? "n" : undefined}
-                aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
-                tabIndex={0}
-                onClick={() => toggleSort(c.key)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    toggleSort(c.key);
-                  }
-                }}
-              >
-                {c.label}
-              </div>
-            );
-          })}
-        </div>
         <div ref={scrollRef} className="urltable-scroll">
+          <div role="row" className="urltable-head" style={{ gridTemplateColumns: GRID }}>
+            {COLUMNS.map((c) => {
+              const active = sort?.key === c.key;
+              return (
+                <div
+                  key={c.key}
+                  role="columnheader"
+                  className={c.numeric ? "n" : undefined}
+                  aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+                  tabIndex={0}
+                  onClick={() => toggleSort(c.key)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      toggleSort(c.key);
+                    }
+                  }}
+                >
+                  <span>{c.label}</span>
+                </div>
+              );
+            })}
+          </div>
           <div role="rowgroup" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
             {virtualizer.getVirtualItems().map((v) => {
               const r = visible[v.index];

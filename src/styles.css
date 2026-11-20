@@ -206,7 +206,7 @@ select {
 .home-h {
   margin-bottom: 8px;
   font-size: inherit;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .site {
@@ -244,7 +244,7 @@ select {
 
 .crawl-row {
   display: grid;
-  grid-template-columns: 170px 160px 1fr auto;
+  grid-template-columns: 130px minmax(0, 1fr) 80px auto;
   gap: 10px;
   width: 100%;
   padding: 5px 10px;
@@ -267,6 +267,10 @@ select {
   white-space: nowrap;
 }
 
+.crawl-row > .dim:nth-child(3) {
+  text-align: right;
+}
+
 .crawl-row:hover {
   background: var(--sel);
 }
@@ -277,10 +281,12 @@ select {
 
 .crawl-status.tone-redir::before {
   content: "● ";
+  content: "● " / "";
 }
 
 .crawl-open::after {
   content: " ›";
+  content: " ›" / "";
 }
 
 /* ---- Crawl ---- */
@@ -292,8 +298,20 @@ select {
   min-height: 0;
 }
 
+.crawl-back {
+  padding: 0;
+  border: 0;
+  color: var(--dim);
+}
+
+.crawl-back:hover:not(:disabled) {
+  border-color: transparent;
+  color: var(--strong);
+}
+
 .crawl-back::before {
   content: "‹ ";
+  content: "‹ " / "";
 }
 
 .crawl-url {
@@ -302,12 +320,14 @@ select {
   min-width: 0;
   overflow: hidden;
   padding: 5px 9px;
+  background: transparent;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .crawl-url::before {
   content: "› ";
+  content: "› " / "";
   color: var(--accent);
 }
 
@@ -360,6 +380,7 @@ select {
 
 .crawl-banner::before {
   content: "! ";
+  content: "! " / "";
 }
 
 .crawl-banner {
@@ -406,8 +427,9 @@ select {
 }
 
 .urltable-head {
-  flex: none;
-  padding-right: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   color: var(--dim);
@@ -423,9 +445,21 @@ select {
 }
 
 .urltable-head > div {
+  display: flex;
+  align-items: center;
   cursor: pointer;
   padding-block: 5px;
   user-select: none;
+}
+
+.urltable-head > div > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.urltable-head > .n {
+  justify-content: flex-end;
 }
 
 .urltable-head [aria-sort="ascending"],
@@ -434,12 +468,18 @@ select {
 }
 
 .urltable-head [aria-sort="ascending"]::after {
-  content: " ↑";
+  flex: none;
+  margin-left: 0.5ch;
+  content: "↑";
+  content: "↑" / "";
   color: var(--accent);
 }
 
 .urltable-head [aria-sort="descending"]::after {
-  content: " ↓";
+  flex: none;
+  margin-left: 0.5ch;
+  content: "↓";
+  content: "↓" / "";
   color: var(--accent);
 }
 
@@ -452,6 +492,15 @@ select {
 .urltable-row {
   border-bottom: 1px solid var(--line2);
   cursor: pointer;
+}
+
+.urltable-row:hover:not([aria-selected="true"]) {
+  background: var(--panel);
+}
+
+.urltable-row:focus-visible,
+.urltable-head > div:focus-visible {
+  outline-offset: -2px;
 }
 
 .urltable-row[aria-selected="true"] {
@@ -481,14 +530,14 @@ select {
 .detail h2 {
   margin-bottom: 6px;
   font-size: inherit;
-  font-weight: 500;
+  font-weight: 400;
   overflow-wrap: anywhere;
 }
 
 .detail h3 {
   margin: 10px 0 3px;
   font-size: inherit;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .detail dl {

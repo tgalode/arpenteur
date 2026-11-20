@@ -189,6 +189,29 @@ test("un clic sur un en-tête trie le tableau", async () => {
   expect(firstDataRowUrl()).toBe("https://exemple.fr/tarifs");
 });
 
+test("Entrée et Espace sur une ligne la sélectionnent", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByText("https://exemple.fr/tarifs");
+  const rows = screen.getAllByRole("row");
+  rows[2].focus();
+  await userEvent.keyboard("{Enter}");
+  expect(await screen.findByText("Voir les tarifs")).toBeTruthy();
+  rows[1].focus();
+  await userEvent.keyboard(" ");
+  await waitFor(() => expect(screen.queryByText("Voir les tarifs")).toBeNull());
+  expect(rows[1].getAttribute("aria-selected")).toBe("true");
+});
+
+test("Entrée sur un en-tête trie le tableau", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByText("https://exemple.fr/tarifs");
+  screen.getByRole("columnheader", { name: /prof\./ }).focus();
+  await userEvent.keyboard("{Enter}{Enter}");
+  expect(firstDataRowUrl()).toBe("https://exemple.fr/tarifs");
+});
+
 test("un clic sur une ligne ouvre le détail avec les liens entrants", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
@@ -216,7 +239,7 @@ test("relancer démarre un crawl sur la même URL et l’ouvre", async () => {
   const onOpen = vi.fn();
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={onOpen} />);
   await userEvent.click(await screen.findByRole("button", { name: "relancer" }));
-  expect(api.startCrawl).toHaveBeenCalledWith("https://exemple.fr/");
+  expect(api.startCrawl).toHaveBeenCalledWith("https://exemple.fr/", meta({ kind: "completed" }).settings);
   await waitFor(() => expect(onOpen).toHaveBeenCalledWith("exemple.fr", "nouvel-id", true));
 });
 
