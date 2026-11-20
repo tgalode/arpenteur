@@ -6,7 +6,8 @@ use chrono::{DateTime, Local};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::model::{CollectedData, CrawlLocation, CrawlMeta, SiteSummary};
+use crate::checks::assemble;
+use crate::model::{CollectedData, CrawlLocation, CrawlMeta, CrawlResult, SiteSummary};
 
 const META_FILE: &str = "crawl.json";
 const DATA_FILE: &str = "arpenteur.json";
@@ -116,6 +117,11 @@ impl CrawlStore {
             Err(e) => return Err(e),
         };
         Ok((meta, data))
+    }
+
+    pub fn load_result(&self, domain: &str, id: &str) -> io::Result<CrawlResult> {
+        let (meta, data) = self.read_crawl(domain, id)?;
+        Ok(assemble(meta, data))
     }
 }
 

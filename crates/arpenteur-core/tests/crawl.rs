@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use arpenteur_core::collector::CrawlEvents;
 use arpenteur_core::engine::run_crawl;
-use arpenteur_core::model::{CrawlMeta, CrawlSettings, CrawlStatus, Progress};
+use arpenteur_core::model::{
+    CrawlMeta, CrawlResult, CrawlSettings, CrawlStatus, FindingCode, Progress, UrlRow,
+};
 use arpenteur_core::sitemap::{discover, discover_with_limit};
 use arpenteur_core::storage::CrawlStore;
 use support::{Variant, start_fixture_site};
@@ -187,4 +189,42 @@ async fn throttled_site_stops_crawl() {
     assert_eq!(meta.status, CrawlStatus::Throttled);
     let (m, _) = store.read_crawl(&loc.domain, &loc.id).unwrap();
     assert_eq!(m.status, CrawlStatus::Throttled);
+}
+
+fn path_of(url: &str) -> String {
+    Url::parse(url).unwrap().path().to_string()
+}
+
+fn has(r: &CrawlResult, code: FindingCode, path: &str) -> bool {
+    r.findings
+        .iter()
+        .any(|f| f.code == code && path_of(&f.url) == path)
+}
+
+fn has_with_related(r: &CrawlResult, code: FindingCode, path: &str, related: &[&str]) -> bool {
+    r.findings.iter().any(|f| {
+        f.code == code
+            && path_of(&f.url) == path
+            && f.related.iter().map(|u| path_of(u)).collect::<Vec<_>>() == related
+    })
+}
+
+fn row<'a>(r: &'a CrawlResult, path: &str) -> &'a UrlRow {
+    r.rows.iter().find(|x| path_of(&x.url) == path).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn load_result_on_fixture_site() {
+    let (_site, store, loc, _meta, _root) = run(Variant::Standard, |_| Arc::new(NoEvents)).await;
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    assert!(has(&r, FindingCode::CanonicalToRedirect, "/b"));
+    assert!(has(&r, FindingCode::OrphanPage, "/orphan"));
+    assert!(has_with_related(&r, FindingCode::BrokenInternalLink, "/missing", &["/"]));
+    assert!(has(&r, FindingCode::ImageTooHeavy, "/img/big.jpg"));
+    assert!(has(&r, FindingCode::JsonLdInvalid, "/b"));
+    assert!(has(&r, FindingCode::TemporaryRedirect, "/temp"));
+    assert!(has(&r, FindingCode::DuplicateContent, "/dup1"));
+    assert!(has(&r, FindingCode::SitemapUrlError, "/gone"));
+    assert_eq!(r.rows.len(), r.pages.len());
+    assert_eq!(row(&r, "/b").depth, Some(1));
 }
