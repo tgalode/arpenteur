@@ -33,6 +33,18 @@ fn count(row: &Value, key: &str) -> u64 {
     text(row, key).parse().unwrap_or(0)
 }
 
+/// Début des messages d'échec de connexion de l'analyse TLS de SiteOne : elle ouvre
+/// sa propre connexion, directe, donc un échec ne dit rien du certificat du site.
+const CONNECTION_FAILURES: [&str; 3] = [
+    "Unable to connect to ",
+    "Unable to create TLS connection to ",
+    "Invalid hostname ",
+];
+
+fn is_connection_failure(message: &str) -> bool {
+    CONNECTION_FAILURES.iter().any(|p| message.starts_with(p))
+}
+
 pub fn read_siteone(json: &str) -> Option<SiteOneSummary> {
     let root: Value = serde_json::from_str(json).ok()?;
     if !root.is_object() {
@@ -40,22 +52,30 @@ pub fn read_siteone(json: &str) -> Option<SiteOneSummary> {
     }
     let mut summary = SiteOneSummary::default();
 
+    let mut expiry_note = None;
     for row in rows(&root, "certificate-info") {
         let value = text(row, "value");
         match text(row, "info") {
             "Issuer" if !value.is_empty() => summary.certificate_issuer = Some(value.to_string()),
-            "Errors" if !value.is_empty() => summary.certificate_errors.push(value.to_string()),
+            "Errors" if !value.is_empty() && !is_connection_failure(value) => {
+                summary.certificate_errors.push(value.to_string())
+            }
             "Valid to" if value.contains("EXPIRED") => {
                 summary.certificate_expired = true;
-                let already_said = summary
-                    .certificate_errors
-                    .iter()
-                    .any(|e| e.to_lowercase().contains("expired"));
-                if !already_said {
-                    summary.certificate_errors.push(value.to_string());
-                }
+                expiry_note = Some(value.to_string());
             }
             _ => {}
+        }
+    }
+    // « Valid to » et « Errors » disent la même expiration : une seule mention,
+    // quel que soit l'ordre des lignes.
+    if let Some(note) = expiry_note {
+        let already_said = summary
+            .certificate_errors
+            .iter()
+            .any(|e| e.to_lowercase().contains("expired"));
+        if !already_said {
+            summary.certificate_errors.push(note);
         }
     }
 
@@ -103,7 +123,7 @@ pub fn site_findings(summary: &SiteOneSummary, start_url: &str) -> Vec<Finding> 
                 .iter()
                 .map(|i| i.header.clone())
                 .collect(),
-            detail: Some(recommendations.join(" ")),
+            detail: (!recommendations.is_empty()).then(|| recommendations.join(" ")),
         });
     }
     out
@@ -171,6 +191,99 @@ mod tests {
         let no_issuer = findings(&report(ERRORS_ROW, ""));
         assert_eq!(no_issuer.len(), 1);
         assert_eq!(no_issuer[0].detail.as_deref(), Some("TLS handshake failed"));
+    }
+
+    const CONNECT_FAILURE: &str = r#"{"info":"Errors","value":"Unable to connect to www.exemple.fr:443: Connection refused (os error 61)"}"#;
+    const EXPIRED_ERROR: &str =
+        r#"{"info":"Errors","value":"SSL/TLS certificate expired 3 day(s) ago."}"#;
+
+    #[test]
+    fn connection_failures_of_the_tls_analysis_are_not_findings() {
+        for message in [
+            "Unable to connect to www.exemple.fr:443: timed out",
+            "Unable to create TLS connection to www.exemple.fr:443: oups",
+            "Invalid hostname 'exemple_fr': invalid dns name",
+        ] {
+            let row = format!(r#"{{"info":"Errors","value":"{message}"}}"#);
+            let json = report(&row, "");
+            let summary = read_siteone(&json).unwrap();
+            assert!(summary.certificate_errors.is_empty(), "{message}");
+            assert!(findings(&json).is_empty(), "{message}");
+        }
+        let json = report(&[ISSUER, CONNECT_FAILURE].join(","), "");
+        assert!(findings(&json).is_empty());
+        let json = report(&[ISSUER, VALID_TO_OK, CONNECT_FAILURE].join(","), "");
+        assert!(findings(&json).is_empty());
+    }
+
+    #[test]
+    fn real_failures_still_give_a_finding() {
+        for message in [
+            "TLS handshake failed (produced no certificate)",
+            "Unable to parse certificate: bad der",
+            "SSL/TLS certificate is not valid yet, valid from Nov 30 2026.",
+        ] {
+            let row = format!(r#"{{"info":"Errors","value":"{message}"}}"#);
+            let f = findings(&report(&row, ""));
+            assert_eq!(f.len(), 1, "{message}");
+            assert_eq!(f[0].detail.as_deref(), Some(message));
+        }
+    }
+
+    #[test]
+    fn expiry_is_said_once_in_the_real_row_order() {
+        // SiteOne écrit « Valid to » (EXPIRED) puis « Errors » avec le même fait.
+        let json = report(&[ISSUER, VALID_TO_EXPIRED, EXPIRED_ERROR].join(","), "");
+        let f = findings(&json);
+        assert_eq!(f.len(), 1);
+        let detail = f[0].detail.as_deref().unwrap();
+        assert_eq!(
+            detail.to_lowercase().matches("expired").count(),
+            1,
+            "{detail}"
+        );
+        assert!(detail.contains("Zscaler"), "{detail}");
+
+        // Ordre inverse : même résultat.
+        let json = report(&[ISSUER, EXPIRED_ERROR, VALID_TO_EXPIRED].join(","), "");
+        let detail = findings(&json)[0].detail.clone().unwrap();
+        assert_eq!(
+            detail.to_lowercase().matches("expired").count(),
+            1,
+            "{detail}"
+        );
+
+        // Expiré et rien d'autre : la mention de « Valid to » reste.
+        let json = report(&[ISSUER, VALID_TO_EXPIRED].join(","), "");
+        let detail = findings(&json)[0].detail.clone().unwrap();
+        assert!(detail.contains("EXPIRED 3 day(s) ago"), "{detail}");
+
+        // Une erreur de connexion à côté d'une expiration : l'expiration reste seule.
+        let json = report(&[ISSUER, VALID_TO_EXPIRED, CONNECT_FAILURE].join(","), "");
+        let f = findings(&json);
+        assert_eq!(f.len(), 1);
+        assert!(
+            !f[0]
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("Unable to connect")
+        );
+    }
+
+    #[test]
+    fn security_detail_is_none_when_no_recommendation_is_given() {
+        let blank = CSP_WARNING.replace(
+            "Content-Security-Policy is set but weakened by 'unsafe-inline'.",
+            "",
+        );
+        let f = findings(&report("", &blank));
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].code, FindingCode::SecurityHeadersMissing);
+        assert_eq!(f[0].detail, None);
+
+        let f = findings(&report("", CSP_WARNING));
+        assert!(f[0].detail.is_some());
     }
 
     #[test]
