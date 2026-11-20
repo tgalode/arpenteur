@@ -16,7 +16,7 @@ Un écran « à propos » donne la version et la licence du moteur de crawl.
 
 ## Installation
 
-Téléchargez l'installeur correspondant à votre système, puis lancez-le. Les installeurs ne sont pas signés (la signature de code est payante) : macOS et Windows affichent donc un avertissement au premier lancement. L'application est saine, il faut simplement l'autoriser une fois.
+Téléchargez l'installeur correspondant à votre système, puis lancez-le. Les installeurs ne sont pas signés (la signature de code est payante) : macOS et Windows affichent donc un avertissement au premier lancement.
 
 ### macOS
 
@@ -46,9 +46,9 @@ npm test             # tests du front (Vitest)
 
 Organisation du dépôt :
 
-- `crates/arpenteur-core` : le moteur (crawl, catalogue des problèmes, export CSV), qui encapsule SiteOne Crawler ;
-- `src-tauri` : l'application Tauri (commandes, enregistrement des crawls, réglages) ;
-- `src` : l'interface React, avec les textes français dans `src/i18n/fr.ts`.
+- `crates/arpenteur-core` : le moteur : crawl (qui encapsule SiteOne Crawler), contrôles qui détectent les problèmes, vérification des cibles de canonical, enregistrement des crawls et des réglages par défaut ;
+- `src-tauri` : l'application Tauri : commandes appelées par l'interface, crawl en cours, arrêt propre à la fermeture ;
+- `src` : l'interface React : catalogue des problèmes (niveaux et textes français dans `src/i18n/fr.ts`), export CSV.
 
 ## Publication d'une version
 

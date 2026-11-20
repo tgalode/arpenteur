@@ -25,14 +25,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Vérifier que le tag correspond à la version
+      - name: Vérifier que le tag correspond aux versions
         shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          version=$(node -p "require('./package.json').version")
-          if [ "$version" != "${{ github.ref_name }}" ]; then
-            echo "Le tag ${{ github.ref_name }} ne correspond pas à la version $version de package.json."
-            exit 1
-          fi
+          package=$(node -p "require('./package.json').version")
+          tauri=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -n 1)
+          status=0
+          for source in "package.json:$package" "src-tauri/tauri.conf.json:$tauri" "src-tauri/Cargo.toml:$cargo"; do
+            file=${source%%:*}
+            version=${source#*:}
+            if [ "$version" != "$TAG" ]; then
+              echo "Le tag $TAG ne correspond pas à la version $version de $file."
+              status=1
+            fi
+          done
+          exit $status
 
       - uses: dtolnay/rust-toolchain@stable
         with:
