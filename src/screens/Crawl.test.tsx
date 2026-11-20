@@ -1,10 +1,11 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
-import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import type { CrawlMeta, CrawlResult, CrawlStatus, Progress, UrlRow } from "../lib/types";
 
 vi.mock("../lib/api", () => ({
+  startCrawl: vi.fn(),
   stopCrawl: vi.fn(),
   loadCrawl: vi.fn(),
   onProgress: vi.fn(),
@@ -105,9 +106,22 @@ function firstDataRowUrl(): string {
 }
 
 // jsdom ne mesure aucune mise en page : le virtualiseur lit clientHeight/clientWidth.
+const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, value: 600 });
   Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, value: 1000 });
+});
+
+afterAll(() => {
+  for (const [key, d] of [
+    ["clientHeight", originalHeight],
+    ["clientWidth", originalWidth],
+  ] as const) {
+    if (d) Object.defineProperty(HTMLElement.prototype, key, d);
+    else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+  }
 });
 
 afterEach(cleanup);
@@ -127,23 +141,23 @@ beforeEach(() => {
 
 test("la progression met à jour le compteur", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
-  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} />);
+  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} onOpen={() => {}} />);
   await waitFor(() => expect(api.loadCrawl).toHaveBeenCalled());
   act(() => progressCb({ done: 1, lastUrl: "u", lastStatus: 200, elapsedMs: 1000 }));
   act(() => progressCb({ done: 2, lastUrl: "u", lastStatus: 200, elapsedMs: 4000 }));
-  expect(await screen.findByText("2 URL traitées · 4 s")).toBeTruthy();
+  expect((await screen.findByTestId("progress")).textContent).toBe("2 URL traitées · 4 s");
 });
 
 test("arrêter appelle stopCrawl", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
-  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} />);
+  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} onOpen={() => {}} />);
   await userEvent.click(await screen.findByRole("button", { name: "arrêter" }));
   expect(api.stopCrawl).toHaveBeenCalled();
 });
 
 test("à la fin, le résultat est chargé et affiché", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValueOnce(result({ kind: "running" }));
-  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} />);
+  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} onOpen={() => {}} />);
   await waitFor(() => expect(api.loadCrawl).toHaveBeenCalledTimes(1));
   vi.mocked(api.loadCrawl).mockResolvedValueOnce(result({ kind: "completed" }));
   await act(async () => finishedCb(meta({ kind: "completed" })));
@@ -153,13 +167,13 @@ test("à la fin, le résultat est chargé et affiché", async () => {
 
 test("un crawl terminé avant les écouteurs est affiché", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
-  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} />);
+  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} onOpen={() => {}} />);
   expect(await screen.findByText("https://exemple.fr/tarifs")).toBeTruthy();
 });
 
 test("un événement de fin d’un autre crawl est ignoré", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
-  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} />);
+  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} onOpen={() => {}} />);
   await waitFor(() => expect(api.loadCrawl).toHaveBeenCalledTimes(1));
   await act(async () => finishedCb(meta({ kind: "completed" }, "autre")));
   expect(api.loadCrawl).toHaveBeenCalledTimes(1);
@@ -167,7 +181,7 @@ test("un événement de fin d’un autre crawl est ignoré", async () => {
 
 test("un clic sur un en-tête trie le tableau", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
-  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} />);
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
   await screen.findByText("https://exemple.fr/tarifs");
   expect(firstDataRowUrl()).toBe("https://exemple.fr/");
   await userEvent.click(screen.getByRole("columnheader", { name: /prof\./ }));
@@ -177,7 +191,7 @@ test("un clic sur un en-tête trie le tableau", async () => {
 
 test("un clic sur une ligne ouvre le détail avec les liens entrants", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
-  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} />);
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
   await userEvent.click(await screen.findByText("https://exemple.fr/tarifs"));
   expect(await screen.findByText("Voir les tarifs")).toBeTruthy();
   expect(screen.getByText("Les prix")).toBeTruthy();
@@ -186,12 +200,48 @@ test("un clic sur une ligne ouvre le détail avec les liens entrants", async () 
 
 test("un crawl arrêté affiche son bandeau", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "stopped" }));
-  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} />);
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
   expect(await screen.findByText("crawl arrêté avant la fin.")).toBeTruthy();
 });
 
 test("un crawl interrompu conseille de baisser le débit", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "throttled" }));
-  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} />);
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
   expect(await screen.findByText(/baissez le débit/)).toBeTruthy();
+});
+
+test("relancer démarre un crawl sur la même URL et l’ouvre", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
+  vi.mocked(api.startCrawl).mockResolvedValue({ domain: "exemple.fr", id: "nouvel-id" });
+  const onOpen = vi.fn();
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={onOpen} />);
+  await userEvent.click(await screen.findByRole("button", { name: "relancer" }));
+  expect(api.startCrawl).toHaveBeenCalledWith("https://exemple.fr/");
+  await waitFor(() => expect(onOpen).toHaveBeenCalledWith("exemple.fr", "nouvel-id", true));
+});
+
+test("relancer refusé affiche le message et reste sur l’écran", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
+  vi.mocked(api.startCrawl).mockRejectedValue("Un crawl est déjà en cours.");
+  const onOpen = vi.fn();
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={onOpen} />);
+  await userEvent.click(await screen.findByRole("button", { name: "relancer" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Un crawl est déjà en cours.");
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+test("pendant le crawl, arrêter est visible et relancer ne l’est pas", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
+  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} onOpen={() => {}} />);
+  expect(await screen.findByRole("button", { name: "arrêter" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "relancer" })).toBeNull();
+});
+
+test("le tableau ne rend qu’une fenêtre de lignes", async () => {
+  const r = result({ kind: "completed" });
+  r.rows = Array.from({ length: 2000 }, (_, i) => row(`https://exemple.fr/p${i}`));
+  vi.mocked(api.loadCrawl).mockResolvedValue(r);
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByText("https://exemple.fr/p0");
+  expect(screen.getAllByRole("row").length).toBeLessThan(200);
 });

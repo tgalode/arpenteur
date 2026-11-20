@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMemo, useRef, useState } from "react";
 import { t } from "../i18n/fr";
-import { filterRows, sortRows, statusText, type StatusClass } from "../lib/table";
+import { filterRows, httpTone, sortRows, statusText, type StatusClass } from "../lib/table";
 import type { UrlRow } from "../lib/types";
 
 type Column = {
@@ -9,25 +9,62 @@ type Column = {
   label: string;
   width: string;
   render: (r: UrlRow) => string;
+  tone?: (r: UrlRow) => string;
+  numeric?: boolean;
+  tip?: boolean;
 };
 
 const text = (v: string | number | null | undefined): string =>
   v === null || v === undefined || v === "" ? t("none") : String(v);
 
+const isEmpty = (v: string | number | null | undefined): boolean => v === null || v === undefined || v === "";
+
 const COLUMNS: Column[] = [
-  { key: "url", label: t("col_url"), width: "3fr", render: (r) => r.url },
-  { key: "status", label: t("col_status"), width: "140px", render: (r) => statusText(r.status) },
-  { key: "contentType", label: t("col_type"), width: "1fr", render: (r) => text(r.contentType) },
-  { key: "title", label: t("col_title"), width: "2fr", render: (r) => text(r.title) },
-  { key: "h1", label: t("col_h1"), width: "2fr", render: (r) => text(r.h1) },
-  { key: "indexable", label: t("col_indexable"), width: "90px", render: (r) => (r.indexable ? t("yes") : t("no")) },
-  { key: "depth", label: t("col_depth"), width: "100px", render: (r) => text(r.depth) },
-  { key: "inlinks", label: t("col_inlinks"), width: "120px", render: (r) => text(r.inlinks) },
-  { key: "wordCount", label: t("col_words"), width: "70px", render: (r) => text(r.wordCount) },
+  { key: "url", label: t("col_url"), width: "3fr", render: (r) => r.url, tip: true },
+  {
+    key: "status",
+    label: t("col_status"),
+    width: "110px",
+    render: (r) => statusText(r.status),
+    tone: (r) => `tone-${httpTone(r.status)}`,
+  },
+  {
+    key: "contentType",
+    label: t("col_type"),
+    width: "1fr",
+    render: (r) => text(r.contentType),
+    tone: () => "dim",
+  },
+  {
+    key: "title",
+    label: t("col_title"),
+    width: "2fr",
+    render: (r) => text(r.title),
+    tone: (r) => (isEmpty(r.title) ? "dim" : ""),
+    tip: true,
+  },
+  {
+    key: "h1",
+    label: t("col_h1"),
+    width: "2fr",
+    render: (r) => text(r.h1),
+    tone: (r) => (isEmpty(r.h1) ? "dim" : ""),
+    tip: true,
+  },
+  {
+    key: "indexable",
+    label: t("col_indexable"),
+    width: "90px",
+    render: (r) => (r.indexable ? t("yes") : t("no")),
+    tone: (r) => (r.indexable ? "tone-ok" : "tone-err"),
+  },
+  { key: "depth", label: t("col_depth"), width: "70px", render: (r) => text(r.depth), numeric: true, tone: (r) => (isEmpty(r.depth) ? "dim" : "") },
+  { key: "inlinks", label: t("col_inlinks"), width: "100px", render: (r) => text(r.inlinks), numeric: true, tone: (r) => (isEmpty(r.inlinks) ? "dim" : "") },
+  { key: "wordCount", label: t("col_words"), width: "70px", render: (r) => text(r.wordCount), numeric: true, tone: (r) => (isEmpty(r.wordCount) ? "dim" : "") },
 ];
 
 const GRID = COLUMNS.map((c) => c.width).join(" ");
-const ROW_HEIGHT = 28;
+const ROW_HEIGHT = 26;
 const STATUS_CLASSES: StatusClass[] = ["all", "2xx", "3xx", "4xx", "5xx", "error"];
 
 function statusLabel(c: StatusClass): string {
@@ -68,16 +105,18 @@ export function UrlTable({
   }
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: "0.5rem", padding: "0.5rem 1rem" }}>
+    <div className="urltable">
+      <div className="urltable-tools">
         <input
           type="search"
+          className="field"
           aria-label={t("filterLabel")}
           placeholder={t("filterPlaceholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
         <select
+          className="field"
           aria-label={t("statusFilterLabel")}
           value={statusClass}
           onChange={(e) => setStatusClass(e.target.value as StatusClass)}
@@ -89,17 +128,17 @@ export function UrlTable({
           ))}
         </select>
       </div>
-      <div role="table" aria-rowcount={visible.length + 1} style={{ fontSize: "0.85rem" }}>
-        <div role="row" style={{ display: "grid", gridTemplateColumns: GRID, fontWeight: 600, padding: "0 1rem" }}>
+      <div role="table" aria-rowcount={visible.length + 1} className="urltable-table">
+        <div role="row" className="urltable-head" style={{ gridTemplateColumns: GRID }}>
           {COLUMNS.map((c) => {
             const active = sort?.key === c.key;
             return (
               <div
                 key={c.key}
                 role="columnheader"
+                className={c.numeric ? "n" : undefined}
                 aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
                 tabIndex={0}
-                style={{ cursor: "pointer", userSelect: "none" }}
                 onClick={() => toggleSort(c.key)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
@@ -109,12 +148,11 @@ export function UrlTable({
                 }}
               >
                 {c.label}
-                {active ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
               </div>
             );
           })}
         </div>
-        <div ref={scrollRef} style={{ height: 360, overflow: "auto" }}>
+        <div ref={scrollRef} className="urltable-scroll">
           <div role="rowgroup" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
             {virtualizer.getVirtualItems().map((v) => {
               const r = visible[v.index];
@@ -122,8 +160,16 @@ export function UrlTable({
                 <div
                   key={r.url}
                   role="row"
+                  className="urltable-row"
+                  tabIndex={0}
                   aria-selected={r.url === selectedUrl}
                   onClick={() => onSelect(r)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onSelect(r);
+                    }
+                  }}
                   style={{
                     position: "absolute",
                     top: 0,
@@ -131,28 +177,26 @@ export function UrlTable({
                     right: 0,
                     height: v.size,
                     transform: `translateY(${v.start}px)`,
-                    display: "grid",
                     gridTemplateColumns: GRID,
-                    alignItems: "center",
-                    padding: "0 1rem",
-                    cursor: "pointer",
-                    background: r.url === selectedUrl ? "rgba(0,120,255,0.12)" : undefined,
                   }}
                 >
-                  {COLUMNS.map((c) => (
-                    <div
-                      key={c.key}
-                      role="cell"
-                      style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                    >
-                      {c.render(r)}
-                    </div>
-                  ))}
+                  {COLUMNS.map((c) => {
+                    const value = c.render(r);
+                    const tone = c.tone?.(r) ?? "";
+                    const cls = [c.numeric ? "n" : "", tone.startsWith("tone-") ? tone : tone ? "dim" : ""]
+                      .filter(Boolean)
+                      .join(" ");
+                    return (
+                      <div key={c.key} role="cell" className={cls || undefined} title={c.tip ? value : undefined}>
+                        {value}
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}
           </div>
-          {visible.length === 0 && <p style={{ padding: "0 1rem" }}>{t("noRows")}</p>}
+          {visible.length === 0 && <p className="dim urltable-empty">{t("noRows")}</p>}
         </div>
       </div>
     </div>

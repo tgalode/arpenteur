@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { filterRows, sortRows, statusText, statusTone } from "./table";
+import { filterRows, httpTone, sortRows, statusText, statusTone } from "./table";
 import type { UrlRow } from "./types";
 
 function row(p: Partial<UrlRow>): UrlRow {
@@ -93,4 +93,13 @@ test("statusTone associe une teinte à chaque statut de crawl", () => {
   expect(statusTone("stopped")).toBe("warn");
   expect(statusTone("throttled")).toBe("warn");
   expect(statusTone("failed")).toBe("err");
+});
+
+test("httpTone colore les statuts HTTP", () => {
+  expect(httpTone(200)).toBe("ok");
+  expect(httpTone(301)).toBe("redir");
+  expect(httpTone(404)).toBe("err");
+  expect(httpTone(503)).toBe("err");
+  expect(httpTone(-1)).toBe("err");
+  expect(httpTone(-6)).toBe("dim");
 });

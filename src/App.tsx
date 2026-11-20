@@ -6,6 +6,7 @@ type Nav = { screen: "home" } | { screen: "crawl"; domain: string; id: string; r
 
 function App() {
   const [nav, setNav] = useState<Nav>({ screen: "home" });
+  const open = (domain: string, id: string, running: boolean) => setNav({ screen: "crawl", domain, id, running });
   if (nav.screen === "crawl") {
     return (
       <Crawl
@@ -13,10 +14,11 @@ function App() {
         id={nav.id}
         running={nav.running}
         onBack={() => setNav({ screen: "home" })}
+        onOpen={open}
       />
     );
   }
-  return <Home onOpen={(domain, id, running) => setNav({ screen: "crawl", domain, id, running })} />;
+  return <Home onOpen={open} />;
 }
 
 export default App;

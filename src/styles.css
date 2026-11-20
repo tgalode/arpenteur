@@ -282,3 +282,250 @@ select {
 .crawl-open::after {
   content: " ›";
 }
+
+/* ---- Crawl ---- */
+
+.crawl {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.crawl-back::before {
+  content: "‹ ";
+}
+
+.crawl-url {
+  flex: 1;
+  max-width: 360px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 5px 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crawl-url::before {
+  content: "› ";
+  color: var(--accent);
+}
+
+.crawl-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--dim);
+}
+
+.crawl-progress em {
+  color: var(--accent);
+  font-style: normal;
+}
+
+.crawl-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(163, 230, 53, 0.18);
+  animation: crawl-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes crawl-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crawl-pulse {
+    animation: none;
+  }
+}
+
+.crawl-error,
+.crawl-banner {
+  margin: 10px 12px 0;
+  padding: 7px 10px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+
+.crawl-error {
+  color: var(--err);
+}
+
+.crawl-banner::before {
+  content: "! ";
+}
+
+.crawl-banner.tone-ok {
+  border-color: rgba(126, 231, 135, 0.4);
+  background: rgba(126, 231, 135, 0.08);
+}
+
+.crawl-banner.tone-redir {
+  border-color: rgba(121, 192, 255, 0.4);
+  background: rgba(121, 192, 255, 0.08);
+}
+
+.crawl-banner.tone-warn {
+  border-color: rgba(227, 179, 65, 0.4);
+  background: rgba(227, 179, 65, 0.08);
+}
+
+.crawl-banner.tone-err {
+  border-color: rgba(255, 123, 114, 0.4);
+  background: rgba(255, 123, 114, 0.08);
+}
+
+.crawl-loading {
+  padding: 12px 14px;
+}
+
+.urltable {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.urltable-tools {
+  display: flex;
+  gap: 8px;
+  padding: 9px 12px 7px;
+}
+
+.urltable-tools input {
+  flex: 1;
+}
+
+.urltable-table {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.urltable-head,
+.urltable-row {
+  display: grid;
+  align-items: center;
+}
+
+.urltable-head {
+  flex: none;
+  padding-right: 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--dim);
+}
+
+.urltable-head > div,
+.urltable-row > div {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.urltable-head > div {
+  cursor: pointer;
+  padding-block: 5px;
+  user-select: none;
+}
+
+.urltable-head [aria-sort="ascending"],
+.urltable-head [aria-sort="descending"] {
+  color: var(--strong);
+}
+
+.urltable-head [aria-sort="ascending"]::after {
+  content: " ↑";
+  color: var(--accent);
+}
+
+.urltable-head [aria-sort="descending"]::after {
+  content: " ↓";
+  color: var(--accent);
+}
+
+.urltable-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.urltable-row {
+  border-bottom: 1px solid var(--line2);
+  cursor: pointer;
+}
+
+.urltable-row[aria-selected="true"] {
+  background: var(--sel);
+}
+
+.urltable .n {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.urltable-empty {
+  padding: 8px 9px;
+}
+
+.detail {
+  flex: none;
+  max-height: 40vh;
+  margin: 0 12px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  overflow: auto;
+}
+
+.detail h2 {
+  margin-bottom: 6px;
+  font-size: inherit;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.detail h3 {
+  margin: 10px 0 3px;
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.detail dl {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 3px 12px;
+}
+
+.detail dd {
+  color: var(--strong);
+  overflow-wrap: anywhere;
+}
+
+.detail ul {
+  padding: 0;
+  list-style: none;
+}
+
+.detail li {
+  overflow-wrap: anywhere;
+}
+
+.detail li > span:first-child {
+  color: var(--strong);
+}

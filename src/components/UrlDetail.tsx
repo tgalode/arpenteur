@@ -14,8 +14,8 @@ export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult })
   const metaDescription = facts?.metaDescription ?? row.metaDescription;
 
   return (
-    <section aria-label={row.url} style={{ padding: "0.5rem 1rem", overflow: "auto", maxHeight: "40vh" }}>
-      <h2 style={{ fontSize: "1rem" }}>{row.url}</h2>
+    <section aria-label={row.url} className="detail">
+      <h2 className="strong">{row.url}</h2>
       <dl>
         <dt>{t("detail_canonical")}</dt>
         <dd>{canonical ?? t("none")}</dd>

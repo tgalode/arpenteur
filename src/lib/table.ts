@@ -82,3 +82,11 @@ export function statusTone(kind: CrawlStatus["kind"]): StatusTone {
       return "err";
   }
 }
+
+export function httpTone(status: number): "ok" | "redir" | "err" | "dim" {
+  if (status === ERROR_SKIPPED) return "dim";
+  if (status < 0 || status >= 400) return "err";
+  if (status >= 300) return "redir";
+  if (status >= 200) return "ok";
+  return "dim";
+}
