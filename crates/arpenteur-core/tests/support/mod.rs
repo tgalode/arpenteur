@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use axum::{
     Router,
     extract::State,
-    http::{StatusCode, Uri, header},
+    http::{HeaderMap, StatusCode, Uri, header},
     response::{IntoResponse, Response},
 };
 
@@ -20,7 +20,14 @@ pub enum Variant {
     RobotsDisallow,
     /// Chaque page lente (~300 ms) et liée à `LINKED_PAGES` pages.
     Slow,
+    /// `/x` a un canonical vers `/canon-target`, qui redirige en 301 et n'est liée nulle part.
+    CanonicalOrphanTarget,
+    /// `/` répond `content-encoding: br` à la requête de sonde seulement.
+    BrotliOnProbe,
 }
+
+/// `Accept-Encoding` envoyé par la sonde de compression.
+pub const PROBE_ACCEPT_ENCODING: &str = "gzip, deflate, br";
 
 /// Pages liées depuis "/" par `Throttled` (toutes en 429) et par chaque page de `Slow`.
 pub const LINKED_PAGES: usize = 25;
@@ -32,7 +39,16 @@ pub struct FixtureSite {
 
 impl FixtureSite {
     pub fn requested(&self, path: &str) -> bool {
-        self.requests.lock().unwrap().iter().any(|p| p == path)
+        self.count(path) > 0
+    }
+
+    pub fn count(&self, path: &str) -> usize {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| *p == path)
+            .count()
     }
 }
 
@@ -106,10 +122,40 @@ fn many_links_page() -> Response {
     ))
 }
 
-async fn handle(State(st): State<AppState>, uri: Uri) -> Response {
+async fn handle(State(st): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
     let path = uri.path().to_string();
     st.requests.lock().unwrap().push(path.clone());
     let base = &st.base;
+
+    if st.variant == Variant::BrotliOnProbe
+        && path == "/"
+        && headers
+            .get(header::ACCEPT_ENCODING)
+            .is_some_and(|v| v == PROBE_ACCEPT_ENCODING)
+    {
+        return (
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CONTENT_ENCODING, "br"),
+            ],
+            "br",
+        )
+            .into_response();
+    }
+    if st.variant == Variant::CanonicalOrphanTarget {
+        return match path.as_str() {
+            "/robots.txt" => text("text/plain", "User-agent: *\nAllow: /\n".to_string()),
+            "/" => html(
+                r#"<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Accueil</title></head><body><h1>Accueil</h1><a href="/x">x</a></body></html>"#
+                    .to_string(),
+            ),
+            "/x" => html(format!(
+                r#"<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>X</title><link rel="canonical" href="{base}/canon-target"></head><body><h1>X</h1></body></html>"#
+            )),
+            "/canon-target" => redirect(StatusCode::MOVED_PERMANENTLY, "/x"),
+            _ => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
 
     if st.variant == Variant::Throttled && path == "/" {
         return many_links_page();

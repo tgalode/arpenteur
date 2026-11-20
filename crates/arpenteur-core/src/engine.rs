@@ -73,6 +73,7 @@ use siteone_crawler::engine::manager::Manager;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
+use crate::canonical_probe::{probe_client, run_post_crawl_probes};
 use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
 use crate::model::{
     CollectedData, CrawlLocation, CrawlMeta, CrawlSettings, CrawlStatus, SitemapResult,
@@ -226,7 +227,31 @@ pub async fn run_crawl(
         Ok(()) => execute(&settings, &start, &location, events, &cancel).await,
     };
 
-    let pages = handle.map(|h| h.pages()).unwrap_or_default();
+    let mut pages = handle.map(|h| h.pages()).unwrap_or_default();
+    let mut start_content_encoding = None;
+    if status == CrawlStatus::Completed {
+        // Après un crawl terminé seulement, au même débit et dans la même limite.
+        if let Ok((min_interval, _)) = sitemap_budget(&settings) {
+            let ua = settings
+                .user_agent
+                .clone()
+                .unwrap_or_else(default_user_agent);
+            let ua = ua.trim_end_matches('!').trim_end().to_string();
+            if let Ok(client) = probe_client(&ua) {
+                let probed = run_post_crawl_probes(
+                    &client,
+                    &pages,
+                    &start,
+                    settings.max_requests as usize,
+                    min_interval,
+                    &cancel,
+                )
+                .await;
+                start_content_encoding = probed.content_encoding;
+                pages.extend(probed.pages);
+            }
+        }
+    }
     meta.pages = pages.len() as u32;
     meta.status = status;
     meta.finished_at = Some(chrono::Local::now().to_rfc3339());
@@ -236,7 +261,7 @@ pub async fn run_crawl(
         &CollectedData {
             pages,
             sitemap,
-            ..Default::default()
+            start_content_encoding,
         },
     ) {
         meta.status = write_failure(e);

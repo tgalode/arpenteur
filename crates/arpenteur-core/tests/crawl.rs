@@ -339,3 +339,267 @@ async fn load_result_on_fixture_site() {
     assert_eq!(r.rows.len(), r.pages.len());
     assert_eq!(row(&r, "/b").depth, Some(1));
 }
+
+fn fixture_page(
+    url: &str,
+    status: i32,
+    canonical: Option<&str>,
+) -> arpenteur_core::model::PageRecord {
+    use arpenteur_core::model::{PageFacts, PageRecord};
+    PageRecord {
+        url: url.to_string(),
+        status,
+        content_type: "html".to_string(),
+        size: None,
+        elapsed_ms: 0,
+        headers: Default::default(),
+        facts: Some(PageFacts {
+            title: None,
+            meta_description: None,
+            h1: vec![],
+            canonical: canonical.map(str::to_string),
+            meta_robots: None,
+            links: vec![],
+            images: vec![],
+            json_ld: vec![],
+            word_count: 0,
+            text_hash: String::new(),
+            lang: None,
+            headings: vec![],
+            unlinked_phones: vec![],
+        }),
+    }
+}
+
+fn probe_client() -> reqwest::Client {
+    arpenteur_core::canonical_probe::probe_client("Arpenteur-test").unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unlinked_canonical_target_is_probed() {
+    let (site, store, loc, meta, _root) =
+        run(Variant::CanonicalOrphanTarget, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    assert!(has(&r, FindingCode::CanonicalToRedirect, "/x"));
+    assert_eq!(site.count("/canon-target"), 1);
+    let target = r
+        .pages
+        .iter()
+        .find(|p| path_of(&p.url) == "/canon-target")
+        .unwrap();
+    assert_eq!(target.status, 301);
+    assert_eq!(target.content_type, "redirect");
+    assert!(target.facts.is_none());
+    assert_eq!(
+        target.headers.get("location").map(String::as_str),
+        Some("/x")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn probe_respects_budget_and_cancel() {
+    let site = start_fixture_site(Variant::CanonicalOrphanTarget).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let pages = vec![fixture_page(
+        &format!("{}/x", site.base),
+        200,
+        Some(&format!("{}/canon-target", site.base)),
+    )];
+    let live = CancellationToken::new();
+    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
+        &probe_client(),
+        &pages,
+        &start,
+        0,
+        Duration::ZERO,
+        &live,
+    )
+    .await;
+    assert!(added.is_empty());
+
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
+        &probe_client(),
+        &pages,
+        &start,
+        10,
+        Duration::ZERO,
+        &cancelled,
+    )
+    .await;
+    assert!(added.is_empty());
+    assert_eq!(site.count("/canon-target"), 0);
+
+    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
+        &probe_client(),
+        &pages,
+        &start,
+        10,
+        Duration::ZERO,
+        &live,
+    )
+    .await;
+    assert_eq!(added.len(), 1);
+    assert_eq!(site.count("/canon-target"), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn external_canonical_is_not_probed() {
+    let site = start_fixture_site(Variant::CanonicalOrphanTarget).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    // `localhost` n'est pas le même site que `127.0.0.1`.
+    let external = site.base.replace("127.0.0.1", "localhost");
+    let pages = vec![fixture_page(
+        &format!("{}/x", site.base),
+        200,
+        Some(&format!("{external}/canon-target")),
+    )];
+    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
+        &probe_client(),
+        &pages,
+        &start,
+        10,
+        Duration::ZERO,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(added.is_empty());
+    assert_eq!(site.count("/canon-target"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn crawled_or_duplicate_canonical_targets_are_probed_once_or_never() {
+    let site = start_fixture_site(Variant::CanonicalOrphanTarget).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let target = format!("{}/canon-target", site.base);
+    let pages = vec![
+        fixture_page(&format!("{}/x", site.base), 200, Some(&target)),
+        fixture_page(
+            &format!("{}/y", site.base),
+            200,
+            Some(&format!("{target}#frag")),
+        ),
+        fixture_page(
+            &format!("{}/z", site.base),
+            200,
+            Some(&format!("{}/x", site.base)),
+        ),
+    ];
+    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
+        &probe_client(),
+        &pages,
+        &start,
+        10,
+        Duration::ZERO,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(added.len(), 1);
+    assert_eq!(site.count("/canon-target"), 1);
+    assert_eq!(site.count("/x"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn brotli_observed_on_start_page() {
+    let (_site, store, loc, meta, _root) =
+        run(Variant::BrotliOnProbe, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(data.start_content_encoding.as_deref(), Some("br"));
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    assert!(
+        !r.findings
+            .iter()
+            .any(|f| f.code == FindingCode::ModernCompressionMissing)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn missing_brotli_is_reported_on_start_url() {
+    let (site, store, loc, _meta, _root) = run(Variant::Standard, |_| Arc::new(NoEvents)).await;
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(data.start_content_encoding.as_deref(), Some(""));
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    let found: Vec<_> = r
+        .findings
+        .iter()
+        .filter(|f| f.code == FindingCode::ModernCompressionMissing)
+        .collect();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].url, format!("{}/", site.base));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn content_encoding_probe_needs_a_200_and_a_live_token() {
+    let site = start_fixture_site(Variant::BrotliOnProbe).await;
+    let live = CancellationToken::new();
+    let url = |p: &str| Url::parse(&format!("{}{p}", site.base)).unwrap();
+    let probe = arpenteur_core::canonical_probe::probe_content_encoding;
+
+    assert_eq!(
+        probe(&probe_client(), &url("/"), &live).await.as_deref(),
+        Some("br")
+    );
+    assert_eq!(
+        probe(&probe_client(), &url("/a"), &live).await.as_deref(),
+        Some("")
+    );
+    assert_eq!(probe(&probe_client(), &url("/old"), &live).await, None);
+    assert_eq!(probe(&probe_client(), &url("/missing"), &live).await, None);
+
+    let before = site.requests.lock().unwrap().len();
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    assert_eq!(probe(&probe_client(), &url("/"), &cancelled).await, None);
+    assert_eq!(site.requests.lock().unwrap().len(), before);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn post_crawl_probes_share_one_budget() {
+    let site = start_fixture_site(Variant::CanonicalOrphanTarget).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let pages = vec![
+        fixture_page(&format!("{}/", site.base), 200, None),
+        fixture_page(
+            &format!("{}/x", site.base),
+            200,
+            Some(&format!("{}/canon-target", site.base)),
+        ),
+    ];
+    let run = |max: usize, cancel: CancellationToken| {
+        let (pages, start) = (pages.clone(), start.clone());
+        async move {
+            arpenteur_core::canonical_probe::run_post_crawl_probes(
+                &probe_client(),
+                &pages,
+                &start,
+                max,
+                Duration::ZERO,
+                &cancel,
+            )
+            .await
+        }
+    };
+
+    // Budget nul (limite déjà atteinte) ou jeton annulé : aucune requête.
+    let r = run(2, CancellationToken::new()).await;
+    assert!(r.content_encoding.is_none() && r.pages.is_empty());
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    let r = run(10, cancelled).await;
+    assert!(r.content_encoding.is_none() && r.pages.is_empty());
+    assert_eq!(site.requests.lock().unwrap().len(), 0);
+
+    // Un seul slot : la compression passe d'abord, la cible n'est pas demandée.
+    let r = run(3, CancellationToken::new()).await;
+    assert_eq!(r.content_encoding.as_deref(), Some(""));
+    assert!(r.pages.is_empty());
+    assert_eq!(site.count("/"), 1);
+    assert_eq!(site.count("/canon-target"), 0);
+
+    let r = run(4, CancellationToken::new()).await;
+    assert_eq!(r.pages.len(), 1);
+    assert_eq!(site.count("/canon-target"), 1);
+}

@@ -1,3 +1,4 @@
+pub mod canonical_probe;
 pub mod checks;
 pub mod collector;
 pub mod engine;
