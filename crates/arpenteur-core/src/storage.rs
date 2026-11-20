@@ -106,6 +106,8 @@ impl CrawlStore {
     }
 
     pub fn read_crawl(&self, domain: &str, id: &str) -> io::Result<(CrawlMeta, CollectedData)> {
+        check_segment(domain)?;
+        check_segment(id)?;
         let dir = self.sites_dir().join(domain).join(id);
         let meta = read_json::<CrawlMeta>(&dir.join(META_FILE))?;
         let data = match read_json::<CollectedData>(&dir.join(DATA_FILE)) {
@@ -115,6 +117,22 @@ impl CrawlStore {
         };
         Ok((meta, data))
     }
+}
+
+/// Refuse tout ce qui n'est pas un nom de dossier simple (entrée non fiable).
+fn check_segment(segment: &str) -> io::Result<()> {
+    let bad = segment.is_empty()
+        || segment == "."
+        || segment == ".."
+        || segment.contains(['/', '\\', '\0'])
+        || segment.contains(':');
+    if bad {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid path segment: {segment:?}"),
+        ));
+    }
+    Ok(())
 }
 
 fn read_json<T: DeserializeOwned>(path: &Path) -> io::Result<T> {
@@ -255,6 +273,21 @@ mod tests {
         assert_eq!(data.sitemap.urls, ["https://exemple.fr/a"]);
 
         assert!(store.read_crawl("exemple.fr", "inconnu").is_err());
+    }
+
+    #[test]
+    fn read_crawl_rejects_path_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CrawlStore::new(tmp.path().to_path_buf());
+        let loc = store.create_crawl("exemple.fr", fixed()).unwrap();
+        store.write_meta(&loc, &meta(&loc.id, "exemple.fr")).unwrap();
+        for bad in ["", ".", "..", "../x", "a/b", "a\\b", "/etc", "C:\\x", "C:x"] {
+            let e = store.read_crawl(bad, &loc.id).unwrap_err();
+            assert_eq!(e.kind(), io::ErrorKind::InvalidInput, "domain {bad:?}");
+            let e = store.read_crawl("exemple.fr", bad).unwrap_err();
+            assert_eq!(e.kind(), io::ErrorKind::InvalidInput, "id {bad:?}");
+        }
+        assert!(store.read_crawl("exemple.fr", &loc.id).is_ok());
     }
 
     #[test]
