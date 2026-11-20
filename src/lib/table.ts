@@ -1,5 +1,5 @@
 import { t } from "../i18n/fr";
-import type { UrlRow } from "./types";
+import type { CrawlStatus, UrlRow } from "./types";
 
 // Statuts négatifs de SiteOne (result/visited_url.rs) : aucune réponse HTTP.
 const ERROR_CONNECTION_FAIL = -1;
@@ -65,4 +65,20 @@ export function filterRows(rows: UrlRow[], f: { query: string; statusClass: Stat
     if (!q) return true;
     return [r.url, r.title, r.h1].some((v) => v?.toLowerCase().includes(q));
   });
+}
+
+export type StatusTone = "ok" | "redir" | "warn" | "err" | "dim";
+
+export function statusTone(kind: CrawlStatus["kind"]): StatusTone {
+  switch (kind) {
+    case "completed":
+      return "ok";
+    case "running":
+      return "redir";
+    case "stopped":
+    case "throttled":
+      return "warn";
+    case "failed":
+      return "err";
+  }
 }

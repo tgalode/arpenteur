@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { filterRows, sortRows, statusText } from "./table";
+import { filterRows, sortRows, statusText, statusTone } from "./table";
 import type { UrlRow } from "./types";
 
 function row(p: Partial<UrlRow>): UrlRow {
@@ -85,4 +85,12 @@ describe("statusText", () => {
     expect(statusText(-6)).toBe("ignorée");
     expect(statusText(-3)).toBe("erreur réseau");
   });
+});
+
+test("statusTone associe une teinte à chaque statut de crawl", () => {
+  expect(statusTone("completed")).toBe("ok");
+  expect(statusTone("running")).toBe("redir");
+  expect(statusTone("stopped")).toBe("warn");
+  expect(statusTone("throttled")).toBe("warn");
+  expect(statusTone("failed")).toBe("err");
 });

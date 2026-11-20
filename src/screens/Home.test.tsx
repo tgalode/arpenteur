@@ -102,3 +102,28 @@ test("Accueil rouvre un crawl en cours avec sa progression", async () => {
   await userEvent.click(items[1]);
   expect(onOpen).toHaveBeenLastCalledWith("exemple.fr", "fini", false);
 });
+
+test("chaque crawl de l’accueil est un bouton « ouvrir » accessible au clavier", async () => {
+  vi.mocked(api.listSites).mockResolvedValue([
+    {
+      domain: "exemple.fr",
+      crawls: [meta("a", "2026-01-01T10:00:00Z", 1), meta("b", "2026-02-01T10:00:00Z", 2), meta("c", "2026-03-01T10:00:00Z", 3)],
+    },
+  ]);
+  render(<Home onOpen={() => {}} />);
+  const rows = await screen.findAllByRole("button", { name: /ouvrir/ });
+  expect(rows.length).toBe(3);
+});
+
+test("l’en-tête d’un site affiche le nombre de crawls", async () => {
+  vi.mocked(api.listSites).mockResolvedValue([
+    { domain: "un.fr", crawls: [meta("a", "2026-01-01T10:00:00Z", 1)] },
+    {
+      domain: "trois.fr",
+      crawls: [meta("b", "2026-01-01T10:00:00Z", 1), meta("c", "2026-02-01T10:00:00Z", 2), meta("d", "2026-03-01T10:00:00Z", 3)],
+    },
+  ]);
+  render(<Home onOpen={() => {}} />);
+  expect(await screen.findByText("1 crawl")).toBeTruthy();
+  expect(screen.getByText("3 crawls")).toBeTruthy();
+});

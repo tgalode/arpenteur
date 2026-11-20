@@ -88,6 +88,12 @@ select {
   outline-offset: 1px;
 }
 
+/* Repli global : tout élément interactif montre le focus clavier. */
+:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .field {
   background: var(--bg);
   border: 1px solid var(--field);
@@ -147,4 +153,132 @@ select {
 
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ---- Accueil ---- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.logo {
+  color: var(--accent);
+  font-size: inherit;
+  font-weight: 700;
+}
+
+.home-body {
+  padding: 16px 18px;
+}
+
+.home-new {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.home-new .field {
+  flex: 1;
+  max-width: 360px;
+  min-width: 0;
+  padding: 5px 9px;
+}
+
+.home-new .btn {
+  padding: 5px 11px;
+}
+
+.home-error {
+  margin-bottom: 14px;
+  padding: 7px 10px;
+  border: 1px solid var(--err);
+  border-radius: var(--radius);
+  color: var(--err);
+  overflow-wrap: anywhere;
+}
+
+.home-h {
+  margin-bottom: 8px;
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.site {
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.site ul {
+  padding: 0;
+  list-style: none;
+}
+
+.site-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.site-head h3 {
+  min-width: 0;
+  overflow: hidden;
+  font-size: inherit;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-head span {
+  flex: none;
+}
+
+.crawl-row {
+  display: grid;
+  grid-template-columns: 170px 160px 1fr auto;
+  gap: 10px;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line2);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.site li:last-child .crawl-row {
+  border-bottom: 0;
+}
+
+.crawl-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crawl-row:hover {
+  background: var(--sel);
+}
+
+.crawl-row:hover .crawl-open {
+  color: var(--strong);
+}
+
+.crawl-status.tone-redir::before {
+  content: "● ";
+}
+
+.crawl-open::after {
+  content: " ›";
 }
