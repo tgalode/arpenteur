@@ -118,6 +118,9 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "ego-tree",
+ "flate2",
+ "quick-xml",
+ "reqwest",
  "scraper",
  "serde",
  "serde_json",
