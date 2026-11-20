@@ -28,7 +28,7 @@ Téléchargez l'installeur correspondant à votre système, puis lancez-le. Les 
 
 ### Windows
 
-1. Lancez l'installeur `.exe` (ou `.msi`).
+1. Lancez l'installeur `.exe`.
 2. Windows SmartScreen affiche « Windows a protégé votre ordinateur ».
 3. Cliquez sur « Informations complémentaires », puis sur « Exécuter quand même ».
 4. Suivez l'installation. Les lancements suivants ne demandent plus rien.
@@ -52,7 +52,18 @@ Organisation du dépôt :
 
 ## Publication d'une version
 
-Une version est construite par l'intégration continue quand on pousse un tag `X.Y.Z`, sans préfixe `v` (par exemple `0.2.0`). Le workflow de publication arrive avec la tâche suivante : cette section sera complétée à ce moment.
+Une version est construite par l'intégration continue quand on pousse un tag `X.Y.Z`, sans préfixe `v` (par exemple `0.2.0`).
+
+1. Changez la version dans `package.json`, `src-tauri/tauri.conf.json` et `src-tauri/Cargo.toml`.
+2. Faites un commit.
+3. Posez le tag : `git tag 0.2.0`.
+4. Poussez le tag : `git push origin 0.2.0`.
+5. Attendez la fin du workflow « Release » dans l'onglet Actions de GitHub. Il s'arrête tout de suite si le tag diffère de la version de `package.json`.
+6. Ouvrez la release en brouillon, vérifiez les fichiers, puis publiez-la.
+
+Le workflow produit un `.dmg` pour les Mac Apple Silicon et un installeur `.exe` NSIS pour Windows. Ni l'un ni l'autre n'est signé.
+
+Ce workflow ne peut tourner qu'une fois le dépôt GitHub créé et le code poussé dessus.
 
 ## Licences
 
