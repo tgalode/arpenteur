@@ -151,16 +151,20 @@ export function Crawl({
         </span>
         {result ? (
           <>
-            <button type="button" className="btn" onClick={() => void exportFile("urls", urlsCsv(result.rows))}>
-              {t("export_urls")}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => void exportFile("problemes", problemsCsv(result.findings))}
-            >
-              {t("export_problems")}
-            </button>
+            {result.meta.status.kind !== "running" && (
+              <>
+                <button type="button" className="btn" onClick={() => void exportFile("urls", urlsCsv(result.rows))}>
+                  {t("export_urls")}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => void exportFile("problemes", problemsCsv(result.findings))}
+                >
+                  {t("export_problems")}
+                </button>
+              </>
+            )}
             <button type="button" className="btn btn-primary" disabled={restarting} onClick={() => void restart()}>
               {t("restart")}
             </button>

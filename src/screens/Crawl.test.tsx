@@ -409,3 +409,11 @@ test("une boîte de dialogue annulée n’affiche rien", async () => {
   await waitFor(() => expect(api.exportCsv).toHaveBeenCalled());
   expect(screen.queryByRole("alert")).toBeNull();
 });
+
+test("un résultat encore en cours, chargé hors suivi, n’affiche aucun bouton d’export", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByText("https://exemple.fr/tarifs");
+  expect(screen.queryByRole("button", { name: "exporter les URL" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "exporter les problèmes" })).toBeNull();
+});
