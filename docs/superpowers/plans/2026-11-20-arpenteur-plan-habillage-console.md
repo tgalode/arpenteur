@@ -175,3 +175,34 @@ Lancer `npm run tauri dev`, puis crawler crocweb.fr et contrôler :
 - une URL longue, tronquée sans casser la grille ;
 - « relancer » après un crawl terminé ;
 - le bandeau d'un crawl arrêté.
+
+---
+
+## Bilan d'exécution (20 novembre 2026)
+
+Commits `4306ec6` à `9c623dd`. 36 tests front verts, TypeScript et build propres. Chaque tâche a été relue, puis la passe entière, puis la vague de corrections.
+
+**Décisions prises en cours de route** (chacune avec ce qu'elle coûte si elle est fausse)
+- L'habillage est sur la même branche que le plan 1, puisque tu l'as gardée non fusionnée. Coût : une séparation de branche plus tard.
+- La ligne « 1 connexion · 2 req/s » de la maquette est retirée de l'accueil : l'interface ne connaît pas les réglages du backend. Coût : une ligne d'information.
+- Un repli global `:focus-visible` (contour vert citron) couvre tout élément interactif. Coût : aucun.
+- `gridTemplateColumns` reste en style en ligne dans le tableau, car il est calculé depuis `COLUMNS`, source unique pour l'en-tête et les lignes. Coût : un style en ligne.
+- Après la revue finale :
+  - les colonnes sont en `ch` pour la chasse fixe, avec la flèche de tri qui ne peut plus être coupée ;
+  - l'en-tête collant est placé dans la zone de défilement ;
+  - « relancer » reprend les réglages du crawl ;
+  - la fenêtre s'ouvre en 1280×800, au minimum 960×600 ;
+  - les décorations CSS ne sont plus lues par les lecteurs d'écran.
+- Non corrigés et reportés :
+  - le bandeau « baissez le débit », écrit avant que les réglages existent (plan 2) ;
+  - le placeholder « / filtrer », qui suggère un raccourci inexistant ;
+  - l'affichage des URL en chemin relatif pour le même hôte.
+
+  Coût : une petite dette d'interface.
+
+**Remarques mineures reportées**
+- « connexion impossible » remplit exactement sa colonne : prévoir 1 `ch` de marge.
+- Deux blocs `*` et deux règles `.crawl-banner` à fusionner.
+- La logique de classes de teinte du tableau est à simplifier.
+- Aucun test pour le bouton « relancer » désactivé pendant l'appel.
+- Sous un macOS antérieur à Safari 16.2, `color-mix` n'est pas pris en charge : bandeau sans fond teinté.
