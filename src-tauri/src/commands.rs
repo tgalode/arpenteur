@@ -102,5 +102,8 @@ pub fn load_crawl(
     domain: String,
     id: String,
 ) -> Result<CrawlResult, String> {
-    state.store.load_result(&domain, &id).map_err(|e| e.to_string())
+    state
+        .store
+        .load_result(&domain, &id)
+        .map_err(|e| e.to_string())
 }

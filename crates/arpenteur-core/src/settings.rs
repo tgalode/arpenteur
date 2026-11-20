@@ -69,15 +69,28 @@ pub fn build_argv(settings: &CrawlSettings, start: &Url, crawl_dir: &Path) -> Ve
         "--no-color".to_string(),
         "--output-text-file=".to_string(),
         format!("--user-agent={user_agent}"),
-        format!("--output-json-file={}", crawl_dir.join("siteone.json").display()),
+        format!(
+            "--output-json-file={}",
+            crawl_dir.join("siteone.json").display()
+        ),
         format!(
             "--output-html-report={}",
             crawl_dir.join("siteone-report.html").display()
         ),
         format!("--ignore-regex={ASSET_IGNORE_REGEX}"),
     ];
-    argv.extend(settings.include_regex.iter().map(|r| format!("--include-regex={r}")));
-    argv.extend(settings.ignore_regex.iter().map(|r| format!("--ignore-regex={r}")));
+    argv.extend(
+        settings
+            .include_regex
+            .iter()
+            .map(|r| format!("--include-regex={r}")),
+    );
+    argv.extend(
+        settings
+            .ignore_regex
+            .iter()
+            .map(|r| format!("--ignore-regex={r}")),
+    );
     if !settings.respect_robots {
         argv.push("--ignore-robots-txt".to_string());
     }
@@ -124,8 +137,8 @@ pub(crate) fn crawl_seeds(settings: &CrawlSettings, sitemap: &SitemapResult) -> 
             let included = include.is_empty() || include.iter().any(|re| re.is_match(&full));
             let ignored = ignore.iter().any(|re| re.is_match(&full));
             // SiteOne ne consulte pas robots.txt pour les fichiers statiques.
-            let allowed = parsed.is_static_file()
-                || robots.as_ref().is_none_or(|r| r.is_allowed(url));
+            let allowed =
+                parsed.is_static_file() || robots.as_ref().is_none_or(|r| r.is_allowed(url));
             included && !ignored && allowed
         })
         .cloned()
@@ -142,9 +155,14 @@ mod tests {
 
     #[test]
     fn normalize_adds_scheme_and_trims() {
-        assert_eq!(normalize_start_url("exemple.fr").unwrap().as_str(), "https://exemple.fr/");
         assert_eq!(
-            normalize_start_url("  https://exemple.fr/x ").unwrap().as_str(),
+            normalize_start_url("exemple.fr").unwrap().as_str(),
+            "https://exemple.fr/"
+        );
+        assert_eq!(
+            normalize_start_url("  https://exemple.fr/x ")
+                .unwrap()
+                .as_str(),
             "https://exemple.fr/x"
         );
     }
@@ -174,12 +192,19 @@ mod tests {
         }
         assert!(argv.contains(&format!("--ignore-regex={ASSET_IGNORE_REGEX}")));
         assert!(argv.contains(&format!("--user-agent={}", default_user_agent())));
-        assert!(argv.contains(&format!("--output-json-file={}", dir.join("siteone.json").display())));
+        assert!(argv.contains(&format!(
+            "--output-json-file={}",
+            dir.join("siteone.json").display()
+        )));
         assert!(argv.contains(&format!(
             "--output-html-report={}",
             dir.join("siteone-report.html").display()
         )));
-        assert!(!argv.iter().any(|a| a == "--ignore-robots-txt" || a == "--help" || a == "--version"));
+        assert!(
+            !argv
+                .iter()
+                .any(|a| a == "--ignore-robots-txt" || a == "--help" || a == "--version")
+        );
     }
 
     #[test]
@@ -202,7 +227,10 @@ mod tests {
 
     #[test]
     fn core_options_parse_and_carry_seeds() {
-        let settings = CrawlSettings { max_reqs_per_sec: 0.5, ..CrawlSettings::default() };
+        let settings = CrawlSettings {
+            max_reqs_per_sec: 0.5,
+            ..CrawlSettings::default()
+        };
         let options = build_core_options(
             &settings,
             &start(),
@@ -210,7 +238,10 @@ mod tests {
             vec!["https://exemple.fr/orphan".to_string()],
         )
         .unwrap();
-        assert_eq!(options.url_list_urls, vec!["https://exemple.fr/orphan".to_string()]);
+        assert_eq!(
+            options.url_list_urls,
+            vec!["https://exemple.fr/orphan".to_string()]
+        );
     }
 
     #[test]
@@ -248,13 +279,22 @@ mod tests {
         };
         assert_eq!(seeds(&filtered), ["/blog/a"]);
 
-        let no_robots = CrawlSettings { respect_robots: false, ..filtered };
+        let no_robots = CrawlSettings {
+            respect_robots: false,
+            ..filtered
+        };
         assert_eq!(seeds(&no_robots), ["/blog/a", "/private/b"]);
     }
 
     #[test]
     fn crawl_error_displays_in_french() {
-        assert_eq!(CrawlError::InvalidUrl("x y".into()).to_string(), "Adresse invalide : x y");
-        assert_eq!(CrawlError::Options("zut".into()).to_string(), "Réglages invalides : zut");
+        assert_eq!(
+            CrawlError::InvalidUrl("x y".into()).to_string(),
+            "Adresse invalide : x y"
+        );
+        assert_eq!(
+            CrawlError::Options("zut".into()).to_string(),
+            "Réglages invalides : zut"
+        );
     }
 }

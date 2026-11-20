@@ -13,8 +13,8 @@ use siteone_crawler::analysis::result::url_analysis_result::UrlAnalysisResult;
 use siteone_crawler::engine::manager::Manager;
 use siteone_crawler::options::core_options::{CoreOptions, parse_argv};
 use siteone_crawler::result::visited_url::VisitedUrl;
-use tokio_util::sync::CancellationToken;
 use support::{FixtureSite, Variant, start_fixture_site};
+use tokio_util::sync::CancellationToken;
 
 type Captured = Arc<Mutex<Vec<(String, String)>>>;
 
@@ -93,7 +93,10 @@ fn manager_with_probe(options: CoreOptions, captured: Captured) -> Manager {
 fn assert_send<T: Send>(_: &T) {}
 
 async fn crawl(site: &FixtureSite, extra: Vec<String>, seed: Option<String>) -> Captured {
-    let tmp = std::env::temp_dir().join(format!("arpenteur-smoke-{}", site.base.replace([':', '/'], "_")));
+    let tmp = std::env::temp_dir().join(format!(
+        "arpenteur-smoke-{}",
+        site.base.replace([':', '/'], "_")
+    ));
     std::fs::create_dir_all(&tmp).unwrap();
     let mut argv = base_argv(site, &tmp);
     argv.extend(extra);
@@ -125,7 +128,12 @@ async fn body_given_to_analyzers_is_raw_html() {
 #[tokio::test(flavor = "multi_thread")]
 async fn asset_regex_prevents_js_and_css_requests() {
     let site = start_fixture_site(Variant::Standard).await;
-    crawl(&site, vec![format!("--ignore-regex={}", ASSET_IGNORE_REGEX)], None).await;
+    crawl(
+        &site,
+        vec![format!("--ignore-regex={}", ASSET_IGNORE_REGEX)],
+        None,
+    )
+    .await;
     assert!(!site.requested("/app.js"));
     assert!(!site.requested("/style.css"));
     assert!(site.requested("/img/big.jpg"));
@@ -179,7 +187,10 @@ async fn collector_records_pages_and_progress() {
 
     let home = page(&pages, "/");
     assert_eq!(home.status, 200);
-    assert_eq!(home.facts.as_ref().unwrap().title.as_deref(), Some("Accueil témoin"));
+    assert_eq!(
+        home.facts.as_ref().unwrap().title.as_deref(),
+        Some("Accueil témoin")
+    );
     let old = page(&pages, "/old");
     assert_eq!(old.status, 301);
     assert!(old.location().unwrap().ends_with("/a"));

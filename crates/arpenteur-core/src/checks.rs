@@ -47,7 +47,9 @@ pub fn is_indexable(page: &PageRecord) -> bool {
     if !is_html_200(page) || is_noindex(page) {
         return false;
     }
-    let Some(facts) = &page.facts else { return false };
+    let Some(facts) = &page.facts else {
+        return false;
+    };
     match &facts.canonical {
         None => true,
         Some(c) => norm(c) == norm(&page.url),
@@ -65,12 +67,15 @@ pub fn run_checks(
         (Some(s), Ok(t)) => is_same_site(s, &t),
         _ => false,
     };
-    let by_url: BTreeMap<String, &PageRecord> =
-        pages.iter().map(|p| (norm(&p.url), p)).collect();
+    let by_url: BTreeMap<String, &PageRecord> = pages.iter().map(|p| (norm(&p.url), p)).collect();
 
     let mut out: Vec<Finding> = Vec::new();
     let mut push = |code: FindingCode, url: &str, related: Vec<String>| {
-        out.push(Finding { code, url: url.to_string(), related });
+        out.push(Finding {
+            code,
+            url: url.to_string(),
+            related,
+        });
     };
 
     // Une page externe (atteinte par redirection) reste une ligne du tableau,
@@ -105,7 +110,11 @@ pub fn run_checks(
                 .location()
                 .and_then(|l| Url::parse(&norm(&page.url)).ok()?.join(l.trim()).ok())
                 .map(|u| norm(u.as_str()));
-            push(FindingCode::TemporaryRedirect, &page.url, target.into_iter().collect());
+            push(
+                FindingCode::TemporaryRedirect,
+                &page.url,
+                target.into_iter().collect(),
+            );
         }
         if page.content_type == "image" && page.size.is_some_and(|s| s > IMAGE_HEAVY_BYTES) {
             let me = norm(&page.url);
@@ -119,19 +128,33 @@ pub fn run_checks(
                 })
                 .map(|p| p.url.clone())
                 .collect();
-            push(FindingCode::ImageTooHeavy, &page.url, users.into_iter().collect());
+            push(
+                FindingCode::ImageTooHeavy,
+                &page.url,
+                users.into_iter().collect(),
+            );
         }
     }
 
-    for (first, hops) in links.redirect_chains.iter().filter(|(first, _)| is_internal(first)) {
+    for (first, hops) in links
+        .redirect_chains
+        .iter()
+        .filter(|(first, _)| is_internal(first))
+    {
         push(FindingCode::RedirectChain, first, hops.clone());
     }
 
     for (target, sources) in &links.inlinks {
-        let Some(page) = by_url.get(target) else { continue };
+        let Some(page) = by_url.get(target) else {
+            continue;
+        };
         if is_internal(target) && is_error(page) && !sources.is_empty() {
             let related: BTreeSet<String> = sources.iter().map(|s| s.from.clone()).collect();
-            push(FindingCode::BrokenInternalLink, target, related.into_iter().collect());
+            push(
+                FindingCode::BrokenInternalLink,
+                target,
+                related.into_iter().collect(),
+            );
         }
     }
 
@@ -139,7 +162,9 @@ pub fn run_checks(
     let sitemap_urls: BTreeSet<String> = sitemap.urls.iter().map(|u| norm(u)).collect();
     if sitemap.found {
         for url in &sitemap_urls {
-            let Some(page) = by_url.get(url) else { continue };
+            let Some(page) = by_url.get(url) else {
+                continue;
+            };
             if *url != start_norm
                 && page.status == 200
                 && links.inlinks.get(url).is_none_or(|v| v.is_empty())
@@ -153,7 +178,10 @@ pub fn run_checks(
             }
         }
         for page in pages {
-            if is_internal(&page.url) && is_indexable(page) && !sitemap_urls.contains(&norm(&page.url)) {
+            if is_internal(&page.url)
+                && is_indexable(page)
+                && !sitemap_urls.contains(&norm(&page.url))
+            {
                 push(FindingCode::NotInSitemap, &page.url, vec![]);
             }
         }
@@ -162,7 +190,10 @@ pub fn run_checks(
     }
 
     let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for page in pages.iter().filter(|p| is_html_200(p) && is_internal(&p.url)) {
+    for page in pages
+        .iter()
+        .filter(|p| is_html_200(p) && is_internal(&p.url))
+    {
         if let Some(f) = &page.facts {
             if f.word_count > 0 {
                 groups.entry(&f.text_hash).or_default().push(&page.url);
@@ -171,8 +202,11 @@ pub fn run_checks(
     }
     for members in groups.values().filter(|m| m.len() >= 2) {
         for url in members {
-            let mut related: Vec<String> =
-                members.iter().filter(|m| *m != url).map(|m| m.to_string()).collect();
+            let mut related: Vec<String> = members
+                .iter()
+                .filter(|m| *m != url)
+                .map(|m| m.to_string())
+                .collect();
             related.sort();
             push(FindingCode::DuplicateContent, url, related);
         }
@@ -254,7 +288,11 @@ mod tests {
     struct P(PageRecord);
 
     fn full(path: &str) -> String {
-        if path.starts_with("http") { path.to_string() } else { format!("{BASE}{path}") }
+        if path.starts_with("http") {
+            path.to_string()
+        } else {
+            format!("{BASE}{path}")
+        }
     }
 
     /// Page HTML 200 sans défaut : canonical sur elle-même, JSON-LD valide, 300 mots, contenu unique.
@@ -275,7 +313,10 @@ mod tests {
                 meta_robots: None,
                 links: vec![],
                 images: vec![],
-                json_ld: vec![JsonLd { valid: true, types: vec![] }],
+                json_ld: vec![JsonLd {
+                    valid: true,
+                    types: vec![],
+                }],
                 word_count: 300,
                 text_hash: format!("hash-{url}"),
             }),
@@ -327,21 +368,31 @@ mod tests {
         fn json_ld(mut self, blocks: &[bool]) -> P {
             self.facts().json_ld = blocks
                 .iter()
-                .map(|&valid| JsonLd { valid, types: vec![] })
+                .map(|&valid| JsonLd {
+                    valid,
+                    types: vec![],
+                })
                 .collect();
             self
         }
         fn links(mut self, hrefs: &[&str]) -> P {
             self.facts().links = hrefs
                 .iter()
-                .map(|h| Link { href: full(h), anchor: String::new(), nofollow: false })
+                .map(|h| Link {
+                    href: full(h),
+                    anchor: String::new(),
+                    nofollow: false,
+                })
                 .collect();
             self
         }
         fn images(mut self, srcs: &[&str]) -> P {
             self.facts().images = srcs
                 .iter()
-                .map(|s| Image { src: full(s), alt: None })
+                .map(|s| Image {
+                    src: full(s),
+                    alt: None,
+                })
                 .collect();
             self
         }
@@ -428,7 +479,10 @@ mod tests {
             html("/b").rec(),
         ];
         let f = check(&pages, &no_sitemap());
-        assert_eq!(urls_of(&f, FindingCode::CanonicalToRedirect), vec![full("/a")]);
+        assert_eq!(
+            urls_of(&f, FindingCode::CanonicalToRedirect),
+            vec![full("/a")]
+        );
         assert!(of(&f, FindingCode::CanonicalToOtherUrl).is_empty());
     }
 
@@ -462,7 +516,9 @@ mod tests {
     fn apex_canonical_that_redirects_is_redirect_not_other_host() {
         let www = "https://www.x.fr";
         let pages = vec![
-            html(&format!("{www}/a")).canonical(Some("https://x.fr/a")).rec(),
+            html(&format!("{www}/a"))
+                .canonical(Some("https://x.fr/a"))
+                .rec(),
             redirect("https://x.fr/a", 301, &format!("{www}/a")),
         ];
         let f = check_from(&pages, &no_sitemap(), "https://www.x.fr/");
@@ -488,7 +544,10 @@ mod tests {
             urls_of(&f, FindingCode::TemporaryRedirect),
             vec![full("/r302"), full("/r303"), full("/r307")]
         );
-        assert_eq!(of(&f, FindingCode::TemporaryRedirect)[0].related, vec![full("/a")]);
+        assert_eq!(
+            of(&f, FindingCode::TemporaryRedirect)[0].related,
+            vec![full("/a")]
+        );
     }
 
     #[test]
@@ -509,7 +568,9 @@ mod tests {
     #[test]
     fn broken_internal_link_lists_all_sources() {
         let pages = vec![
-            html("/").links(&["/missing", "/dead", "/ok", "/never"]).rec(),
+            html("/")
+                .links(&["/missing", "/dead", "/ok", "/never"])
+                .rec(),
             html("/a").links(&["/missing"]).rec(),
             html("/ok").rec(),
             other("/missing", 404, ""),
@@ -666,7 +727,9 @@ mod tests {
         let pages = vec![
             html("/meta").robots("Index, NoIndex").rec(),
             html("/none").robots("none").rec(),
-            html("/header").header("x-robots-tag", "googlebot: noindex").rec(),
+            html("/header")
+                .header("x-robots-tag", "googlebot: noindex")
+                .rec(),
             html("/fine").robots("index, follow").rec(),
             html("/plain").rec(),
         ];
@@ -681,7 +744,9 @@ mod tests {
     fn is_indexable_rules() {
         assert!(is_indexable(&html("/a").rec()));
         assert!(!is_indexable(&html("/a").robots("noindex").rec()));
-        assert!(!is_indexable(&html("/a").header("x-robots-tag", "none").rec()));
+        assert!(!is_indexable(
+            &html("/a").header("x-robots-tag", "none").rec()
+        ));
         assert!(!is_indexable(&html("/a").canonical(Some("/b")).rec()));
         assert!(is_indexable(&html("/a").canonical(None).rec()));
         assert!(!is_indexable(&other("/a", 404, "")));
@@ -728,7 +793,10 @@ mod tests {
                 .robots("noindex")
                 .hash("meme")
                 .rec(),
-            html(invalid).canonical(Some("https://autre.com/x")).json_ld(&[false]).rec(),
+            html(invalid)
+                .canonical(Some("https://autre.com/x"))
+                .json_ld(&[false])
+                .rec(),
             redirect("https://autre.com/r1", 301, "https://autre.com/r2"),
             redirect("https://autre.com/r2", 301, "https://autre.com/r3"),
         ];

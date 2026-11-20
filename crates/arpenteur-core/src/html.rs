@@ -21,9 +21,10 @@ fn element_text(el: ElementRef) -> String {
 }
 
 fn has_rel(el: &ElementRef, token: &str) -> bool {
-    el.value()
-        .attr("rel")
-        .is_some_and(|rel| rel.split_whitespace().any(|t| t.eq_ignore_ascii_case(token)))
+    el.value().attr("rel").is_some_and(|rel| {
+        rel.split_whitespace()
+            .any(|t| t.eq_ignore_ascii_case(token))
+    })
 }
 
 fn resolve(base: &Url, href: &str) -> Option<String> {
@@ -61,7 +62,10 @@ fn json_ld_types(value: &serde_json::Value, types: &mut Vec<String>) {
 
 fn parse_json_ld(raw: &str) -> JsonLd {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
-        return JsonLd { valid: false, types: Vec::new() };
+        return JsonLd {
+            valid: false,
+            types: Vec::new(),
+        };
     };
     let mut types = Vec::new();
     match &value {
@@ -87,7 +91,11 @@ pub fn extract_page(html: &str, page_url: &Url) -> PageFacts {
 
     let meta_content = |name: &str| {
         doc.select(&sel("meta[name][content]"))
-            .find(|m| m.value().attr("name").is_some_and(|n| n.eq_ignore_ascii_case(name)))
+            .find(|m| {
+                m.value()
+                    .attr("name")
+                    .is_some_and(|n| n.eq_ignore_ascii_case(name))
+            })
             .and_then(|m| m.value().attr("content"))
             .map(collapse)
     };
@@ -198,9 +206,8 @@ mod tests {
 
     #[test]
     fn respects_base_href() {
-        let f = facts(
-            r#"<head><base href="https://cdn.x.fr/"></head><body><a href="a">L</a></body>"#,
-        );
+        let f =
+            facts(r#"<head><base href="https://cdn.x.fr/"></head><body><a href="a">L</a></body>"#);
         assert_eq!(f.links[0].href, "https://cdn.x.fr/a");
     }
 

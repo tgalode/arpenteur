@@ -77,7 +77,10 @@ mod tests {
 
     fn state() -> (AppState, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        (AppState::new(CrawlStore::new(dir.path().to_path_buf())), dir)
+        (
+            AppState::new(CrawlStore::new(dir.path().to_path_buf())),
+            dir,
+        )
     }
 
     #[test]

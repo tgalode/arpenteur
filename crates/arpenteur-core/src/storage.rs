@@ -323,7 +323,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = CrawlStore::new(tmp.path().to_path_buf());
         let loc = store.create_crawl("exemple.fr", fixed()).unwrap();
-        store.write_meta(&loc, &meta(&loc.id, "exemple.fr")).unwrap();
+        store
+            .write_meta(&loc, &meta(&loc.id, "exemple.fr"))
+            .unwrap();
         for bad in ["", ".", "..", "../x", "a/b", "a\\b", "/etc", "C:\\x", "C:x"] {
             let e = store.read_crawl(bad, &loc.id).unwrap_err();
             assert_eq!(e.kind(), io::ErrorKind::InvalidInput, "domain {bad:?}");
@@ -348,7 +350,9 @@ mod tests {
         let open = running("exemple.fr", None);
         let dated = running("exemple.fr", Some("2026-11-20T14:05:00+01:00"));
         let done = store.create_crawl("autre.fr", fixed()).unwrap();
-        store.write_meta(&done, &meta(&done.id, "autre.fr")).unwrap();
+        store
+            .write_meta(&done, &meta(&done.id, "autre.fr"))
+            .unwrap();
         let broken = tmp.path().join("sites/exemple.fr/casse");
         fs::create_dir_all(&broken).unwrap();
         fs::write(broken.join("crawl.json"), "{").unwrap();

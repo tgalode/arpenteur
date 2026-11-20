@@ -74,7 +74,9 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
-use crate::model::{CollectedData, CrawlLocation, CrawlMeta, CrawlSettings, CrawlStatus, SitemapResult};
+use crate::model::{
+    CollectedData, CrawlLocation, CrawlMeta, CrawlSettings, CrawlStatus, SitemapResult,
+};
 use crate::settings::{CrawlError, build_core_options, crawl_seeds, default_user_agent};
 use crate::sitemap::discover;
 use crate::storage::CrawlStore;
@@ -86,7 +88,10 @@ const NO_PAGE_LOADED_MESSAGE: &str =
     "Aucune page n'a pu être chargée. Vérifiez l'adresse ou la connexion.";
 
 fn http_client(settings: &CrawlSettings) -> Result<reqwest::Client, CrawlError> {
-    let ua = settings.user_agent.clone().unwrap_or_else(default_user_agent);
+    let ua = settings
+        .user_agent
+        .clone()
+        .unwrap_or_else(default_user_agent);
     // Le `!` final est un drapeau SiteOne, pas une partie du User-Agent.
     let ua = ua.trim_end_matches('!').trim_end();
     reqwest::Client::builder()
@@ -120,7 +125,15 @@ async fn execute(
     let prepared = http_client(settings).and_then(|client| Ok((client, sitemap_budget(settings)?)));
     let (client, (min_interval, max_urls)) = match prepared {
         Ok(p) => p,
-        Err(e) => return (CrawlStatus::Failed { message: e.to_string() }, None, SitemapResult::default()),
+        Err(e) => {
+            return (
+                CrawlStatus::Failed {
+                    message: e.to_string(),
+                },
+                None,
+                SitemapResult::default(),
+            );
+        }
     };
 
     let sitemap = tokio::select! {
@@ -135,7 +148,15 @@ async fn execute(
     let seeds = crawl_seeds(settings, &sitemap);
     let options = match build_core_options(settings, start, &location.dir, seeds) {
         Ok(o) => o,
-        Err(e) => return (CrawlStatus::Failed { message: e.to_string() }, None, sitemap),
+        Err(e) => {
+            return (
+                CrawlStatus::Failed {
+                    message: e.to_string(),
+                },
+                None,
+                sitemap,
+            );
+        }
     };
     let mut am = siteone_crawler::analysis::manager::AnalysisManager::new();
     register_builtin_analyzers(&mut am, &options);
@@ -144,7 +165,15 @@ async fn execute(
     am.auto_activate_analyzers();
     let mut manager = match Manager::new(options, am) {
         Ok(m) => m,
-        Err(e) => return (CrawlStatus::Failed { message: e.to_string() }, Some(handle), sitemap),
+        Err(e) => {
+            return (
+                CrawlStatus::Failed {
+                    message: e.to_string(),
+                },
+                Some(handle),
+                sitemap,
+            );
+        }
     };
 
     // Annuler le futur arrête la boucle de SiteOne : une URL = une tâche déjà lancée,

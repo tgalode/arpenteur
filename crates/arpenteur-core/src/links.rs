@@ -38,7 +38,9 @@ pub fn analyze_links(pages: &[PageRecord], start_url: &str) -> LinkReport {
         let Some(facts) = &page.facts else { continue };
         let mut seen_targets = BTreeSet::new();
         for link in &facts.links {
-            let Some(target) = normalize_url(&link.href) else { continue };
+            let Some(target) = normalize_url(&link.href) else {
+                continue;
+            };
             if &target == url || !is_internal(&target) {
                 continue;
             }
@@ -137,11 +139,19 @@ mod tests {
     struct PageBuilder(PageRecord);
 
     fn page(path: &str, status: i32) -> PageBuilder {
-        let url = if path.starts_with("http") { path.to_string() } else { format!("{BASE}{path}") };
+        let url = if path.starts_with("http") {
+            path.to_string()
+        } else {
+            format!("{BASE}{path}")
+        };
         PageBuilder(PageRecord {
             url,
             status,
-            content_type: if (200..300).contains(&status) { "html".into() } else { String::new() },
+            content_type: if (200..300).contains(&status) {
+                "html".into()
+            } else {
+                String::new()
+            },
             size: None,
             elapsed_ms: 0,
             headers: BTreeMap::new(),
@@ -160,7 +170,11 @@ mod tests {
                 links: links
                     .iter()
                     .map(|(href, anchor)| Link {
-                        href: if href.starts_with("http") { href.to_string() } else { format!("{BASE}{href}") },
+                        href: if href.starts_with("http") {
+                            href.to_string()
+                        } else {
+                            format!("{BASE}{href}")
+                        },
                         anchor: anchor.to_string(),
                         nofollow: false,
                     })
@@ -237,20 +251,29 @@ mod tests {
             page("/final", 200).html_links(&[]),
         ];
         let report = analyze_links(&pages, "https://x.fr/");
-        assert_eq!(report.redirect_chains[&u("/r1")], vec![u("/r2"), u("/final")]);
+        assert_eq!(
+            report.redirect_chains[&u("/r1")],
+            vec![u("/r2"), u("/final")]
+        );
         assert_eq!(report.redirect_chains.len(), 1);
     }
 
     #[test]
     fn single_redirect_is_not_a_chain() {
-        let pages = vec![page("/r1", 301).location("/final"), page("/final", 200).done()];
+        let pages = vec![
+            page("/r1", 301).location("/final"),
+            page("/final", 200).done(),
+        ];
         let report = analyze_links(&pages, "https://x.fr/");
         assert!(report.redirect_chains.is_empty());
     }
 
     #[test]
     fn redirect_loop_terminates() {
-        let pages = vec![page("/x", 301).location("/y"), page("/y", 301).location("/x")];
+        let pages = vec![
+            page("/x", 301).location("/y"),
+            page("/y", 301).location("/x"),
+        ];
         let report = analyze_links(&pages, "https://x.fr/");
         assert_eq!(report.redirect_chains[&u("/x")], vec![u("/y"), u("/x")]);
         assert_eq!(report.redirect_chains[&u("/y")], vec![u("/x"), u("/y")]);
@@ -275,7 +298,10 @@ mod tests {
         let report = analyze_links(&pages, "https://x.fr/");
         assert_eq!(report.depth[&u("/old")], 1);
         assert!(!report.depth.contains_key("https://autre.com/"));
-        assert_eq!(report.redirect_chains[&u("/r1")], vec![u("/r2"), "https://autre.com/".to_string()]);
+        assert_eq!(
+            report.redirect_chains[&u("/r1")],
+            vec![u("/r2"), "https://autre.com/".to_string()]
+        );
     }
 
     #[test]
@@ -283,7 +309,8 @@ mod tests {
         let pages = vec![
             page("/", 200).html_links(&[("/go", "go")]),
             page("/go", 301).location("https://autre.com/landing"),
-            page("https://autre.com/landing", 200).html_links(&[("/orphan", "o"), ("/", "accueil")]),
+            page("https://autre.com/landing", 200)
+                .html_links(&[("/orphan", "o"), ("/", "accueil")]),
             page("/orphan", 200).html_links(&[]),
         ];
         let report = analyze_links(&pages, "https://x.fr/");

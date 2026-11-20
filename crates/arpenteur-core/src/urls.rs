@@ -31,7 +31,10 @@ mod tests {
             normalize_url("HTTPS://X.fr:443/a#top").as_deref(),
             Some("https://x.fr/a")
         );
-        assert_eq!(normalize_url("https://x.fr").as_deref(), Some("https://x.fr/"));
+        assert_eq!(
+            normalize_url("https://x.fr").as_deref(),
+            Some("https://x.fr/")
+        );
     }
 
     #[test]

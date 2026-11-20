@@ -264,8 +264,7 @@ async fn unreachable_site_fails() {
     )
     .await;
     let expected = CrawlStatus::Failed {
-        message: "Aucune page n'a pu être chargée. Vérifiez l'adresse ou la connexion."
-            .to_string(),
+        message: "Aucune page n'a pu être chargée. Vérifiez l'adresse ou la connexion.".to_string(),
     };
     assert_eq!(meta.status, expected);
     let (m, _) = store.read_crawl(&loc.domain, &loc.id).unwrap();
@@ -326,7 +325,12 @@ async fn load_result_on_fixture_site() {
     let r = store.load_result(&loc.domain, &loc.id).unwrap();
     assert!(has(&r, FindingCode::CanonicalToRedirect, "/b"));
     assert!(has(&r, FindingCode::OrphanPage, "/orphan"));
-    assert!(has_with_related(&r, FindingCode::BrokenInternalLink, "/missing", &["/"]));
+    assert!(has_with_related(
+        &r,
+        FindingCode::BrokenInternalLink,
+        "/missing",
+        &["/"]
+    ));
     assert!(has(&r, FindingCode::ImageTooHeavy, "/img/big.jpg"));
     assert!(has(&r, FindingCode::JsonLdInvalid, "/b"));
     assert!(has(&r, FindingCode::TemporaryRedirect, "/temp"));
