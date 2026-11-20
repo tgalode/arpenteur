@@ -244,6 +244,9 @@ pub struct CrawlMeta {
 pub struct CollectedData {
     pub pages: Vec<PageRecord>,
     pub sitemap: SitemapResult,
+    /// `None` : non observé ; `Some("")` : aucun `Content-Encoding` reçu.
+    #[serde(default)]
+    pub start_content_encoding: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

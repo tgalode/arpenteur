@@ -231,7 +231,14 @@ pub async fn run_crawl(
     meta.status = status;
     meta.finished_at = Some(chrono::Local::now().to_rfc3339());
 
-    if let Err(e) = store.write_data(&location, &CollectedData { pages, sitemap }) {
+    if let Err(e) = store.write_data(
+        &location,
+        &CollectedData {
+            pages,
+            sitemap,
+            ..Default::default()
+        },
+    ) {
         meta.status = write_failure(e);
     }
     if let Err(e) = store.write_meta(&location, &meta) {

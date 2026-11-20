@@ -23,10 +23,10 @@ fn collapsed(text: Option<&str>) -> Option<String> {
     (!joined.is_empty()).then_some(joined)
 }
 
-fn has_brotli(page: &PageRecord) -> bool {
-    page.headers
-        .get("content-encoding")
-        .is_some_and(|v| v.split(',').any(|t| t.trim().eq_ignore_ascii_case("br")))
+fn has_brotli(content_encoding: &str) -> bool {
+    content_encoding
+        .split(',')
+        .any(|t| t.trim().eq_ignore_ascii_case("br"))
 }
 
 fn norm(raw: &str) -> String {
@@ -77,6 +77,7 @@ pub fn run_checks(
     links: &LinkReport,
     sitemap: &SitemapResult,
     start_url: &str,
+    start_content_encoding: Option<&str>,
 ) -> Vec<Finding> {
     let start = Url::parse(&norm(start_url)).ok();
     let is_internal = |raw: &str| match (&start, Url::parse(&norm(raw))) {
@@ -322,16 +323,13 @@ pub fn run_checks(
         }
     }
 
-    // Constat de site : aucune page HTML 200 interne n'a de quoi être jugée s'il n'y en a pas.
-    let mut html_pages = pages
-        .iter()
-        .filter(|p| is_html_200(p) && is_internal(&p.url));
-    if html_pages.clone().next().is_some() && !html_pages.any(has_brotli) {
+    // Constat de site : il vient d'une requête dédiée, les en-têtes du crawl sont décompressés.
+    if let Some(encoding) = start_content_encoding.filter(|v| !has_brotli(v)) {
         push(
             FindingCode::ModernCompressionMissing,
             start_url,
             vec![],
-            None,
+            (!encoding.is_empty()).then(|| encoding.to_string()),
         );
     }
 
@@ -388,7 +386,13 @@ pub fn build_rows(pages: &[PageRecord], links: &LinkReport) -> Vec<UrlRow> {
 
 pub fn assemble(meta: CrawlMeta, data: CollectedData) -> CrawlResult {
     let links = analyze_links(&data.pages, &meta.start_url);
-    let findings = run_checks(&data.pages, &links, &data.sitemap, &meta.start_url);
+    let findings = run_checks(
+        &data.pages,
+        &links,
+        &data.sitemap,
+        &meta.start_url,
+        data.start_content_encoding.as_deref(),
+    );
     let rows = build_rows(&data.pages, &links);
     CrawlResult {
         meta,
@@ -403,7 +407,7 @@ pub fn assemble(meta: CrawlMeta, data: CollectedData) -> CrawlResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Image, JsonLd, Link, PageFacts};
+    use crate::model::{CollectedData, Image, JsonLd, Link, PageFacts};
 
     const BASE: &str = "https://x.fr";
     const START: &str = "https://x.fr/";
@@ -578,7 +582,7 @@ mod tests {
 
     fn check_from(pages: &[PageRecord], sm: &SitemapResult, start: &str) -> Vec<Finding> {
         let links = analyze_links(pages, start);
-        run_checks(pages, &links, sm, start)
+        run_checks(pages, &links, sm, start, None)
     }
 
     fn check(pages: &[PageRecord], sm: &SitemapResult) -> Vec<Finding> {
@@ -978,7 +982,7 @@ mod tests {
         ];
         let links = analyze_links(&pages, START);
         assert!(!links.inlinks.contains_key(&full("/orphan")));
-        let f = run_checks(&pages, &links, &sitemap(&["/", "/orphan"]), START);
+        let f = run_checks(&pages, &links, &sitemap(&["/", "/orphan"]), START, None);
         assert_eq!(urls_of(&f, FindingCode::OrphanPage), vec![full("/orphan")]);
     }
 
@@ -1193,21 +1197,39 @@ mod tests {
 
     #[test]
     fn brotli_missing_is_one_site_finding() {
-        let gz = |p: &str| clean(p).header("content-encoding", "gzip").rec();
-        let pages = vec![gz("/a"), gz("/b"), other("/gone", 404, "html")];
-        let f = check(&pages, &no_sitemap());
+        let pages = vec![clean("/a").rec(), other("/gone", 404, "html")];
+        let with = |enc: Option<&str>| {
+            let links = analyze_links(&pages, START);
+            run_checks(&pages, &links, &no_sitemap(), START, enc)
+        };
+
+        let f = with(Some("gzip"));
         let found = of(&f, FindingCode::ModernCompressionMissing);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].url, START);
+        assert_eq!(found[0].detail.as_deref(), Some("gzip"));
 
-        let pages = vec![gz("/a"), clean("/b").header("content-encoding", "br").rec()];
-        assert!(only(&pages, FindingCode::ModernCompressionMissing).is_empty());
-        let pages = vec![clean("/a").header("content-encoding", "gzip, br").rec()];
-        assert!(only(&pages, FindingCode::ModernCompressionMissing).is_empty());
+        let f = with(Some(""));
+        let found = of(&f, FindingCode::ModernCompressionMissing);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].url, START);
+        assert_eq!(found[0].detail, None);
 
-        // aucune page HTML 200 interne : rien à juger
-        let pages = vec![other("/gone", 404, "html")];
-        assert!(only(&pages, FindingCode::ModernCompressionMissing).is_empty());
+        for enc in [Some("br"), Some("gzip, br"), Some("BR"), None] {
+            let f = with(enc);
+            assert!(
+                of(&f, FindingCode::ModernCompressionMissing).is_empty(),
+                "{enc:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn collected_data_without_start_content_encoding_loads() {
+        let mut json = serde_json::to_value(CollectedData::default()).unwrap();
+        json.as_object_mut().unwrap().remove("startContentEncoding");
+        let data: CollectedData = serde_json::from_value(json).unwrap();
+        assert_eq!(data.start_content_encoding, None);
     }
 
     #[test]
@@ -1235,7 +1257,6 @@ mod tests {
             FindingCode::HeadingStructure,
             FindingCode::PhoneNotClickable,
             FindingCode::ImageMissingAlt,
-            FindingCode::ModernCompressionMissing,
         ] {
             assert!(of(&f, code.clone()).is_empty(), "{code:?}");
         }
