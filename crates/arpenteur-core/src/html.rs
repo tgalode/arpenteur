@@ -32,11 +32,14 @@ fn resolve(base: &Url, href: &str) -> Option<String> {
     normalize_url(url.as_str())
 }
 
-fn collect_visible(node: NodeRef<Node>, out: &mut Vec<String>) {
-    match node.value() {
-        Node::Text(text) => out.extend(text.split_whitespace().map(str::to_lowercase)),
-        Node::Element(el) if HIDDEN_TEXT.contains(&el.name()) => {}
-        _ => node.children().for_each(|child| collect_visible(child, out)),
+fn collect_visible(root: NodeRef<Node>, out: &mut Vec<String>) {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        match node.value() {
+            Node::Text(text) => out.extend(text.split_whitespace().map(str::to_lowercase)),
+            Node::Element(el) if HIDDEN_TEXT.contains(&el.name()) => {}
+            _ => stack.extend(node.children().rev()),
+        }
     }
 }
 
@@ -276,6 +279,21 @@ mod tests {
         let c = facts("<body><p>Un Trois</p></body>");
         assert_eq!(a.text_hash, b.text_hash);
         assert_ne!(a.text_hash, c.text_hash);
+    }
+
+    #[test]
+    fn deeply_nested_page_does_not_overflow() {
+        let depth = 20000;
+        let html = format!(
+            "<body>{}un deux{}</body>",
+            "<div>".repeat(depth),
+            "</div>".repeat(depth)
+        );
+        let handle = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || facts(&html).word_count)
+            .unwrap();
+        assert_eq!(handle.join().unwrap(), 2);
     }
 
     #[test]
