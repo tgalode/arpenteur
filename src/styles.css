@@ -329,7 +329,7 @@ select {
   height: 8px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 3px rgba(163, 230, 53, 0.18);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
   animation: crawl-pulse 1.4s ease-in-out infinite;
 }
 
@@ -362,24 +362,9 @@ select {
   content: "! ";
 }
 
-.crawl-banner.tone-ok {
-  border-color: rgba(126, 231, 135, 0.4);
-  background: rgba(126, 231, 135, 0.08);
-}
-
-.crawl-banner.tone-redir {
-  border-color: rgba(121, 192, 255, 0.4);
-  background: rgba(121, 192, 255, 0.08);
-}
-
-.crawl-banner.tone-warn {
-  border-color: rgba(227, 179, 65, 0.4);
-  background: rgba(227, 179, 65, 0.08);
-}
-
-.crawl-banner.tone-err {
-  border-color: rgba(255, 123, 114, 0.4);
-  background: rgba(255, 123, 114, 0.08);
+.crawl-banner {
+  border-color: color-mix(in srgb, currentColor 40%, transparent);
+  background: color-mix(in srgb, currentColor 8%, transparent);
 }
 
 .crawl-loading {

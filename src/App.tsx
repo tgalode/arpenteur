@@ -10,6 +10,7 @@ function App() {
   if (nav.screen === "crawl") {
     return (
       <Crawl
+        key={`${nav.domain}/${nav.id}`}
         domain={nav.domain}
         id={nav.id}
         running={nav.running}
