@@ -603,3 +603,55 @@ async fn post_crawl_probes_share_one_budget() {
     assert_eq!(r.pages.len(), 1);
     assert_eq!(site.count("/canon-target"), 1);
 }
+
+async fn sampled_encoding(
+    site: &support::FixtureSite,
+    pages: Vec<arpenteur_core::model::PageRecord>,
+) -> Option<String> {
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    arpenteur_core::canonical_probe::run_post_crawl_probes(
+        &probe_client(),
+        &pages,
+        &start,
+        100,
+        Duration::ZERO,
+        &CancellationToken::new(),
+    )
+    .await
+    .content_encoding
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn compression_is_sampled_on_the_start_url_first() {
+    let site = start_fixture_site(Variant::BrotliOnProbe).await;
+    let at = |p: &str| format!("{}{p}", site.base);
+    let pages = vec![
+        fixture_page(&at("/a"), 200, None),
+        fixture_page(&at("/"), 200, None),
+    ];
+    assert_eq!(sampled_encoding(&site, pages).await.as_deref(), Some("br"));
+    assert_eq!(site.count("/"), 1);
+    assert_eq!(site.count("/a"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn compression_falls_back_to_first_internal_html_page() {
+    let site = start_fixture_site(Variant::BrotliOnProbe).await;
+    let at = |p: &str| format!("{}{p}", site.base);
+    let mut redirected_start = fixture_page(&at("/"), 301, None);
+    redirected_start.content_type = "redirect".to_string();
+    let pages = vec![
+        fixture_page(&at("/b"), 404, None),
+        redirected_start,
+        fixture_page(&at("/a"), 200, None),
+        fixture_page(&at("/dup1"), 200, None),
+    ];
+    assert_eq!(sampled_encoding(&site, pages).await.as_deref(), Some(""));
+    assert_eq!(site.count("/a"), 1);
+    assert_eq!(site.count("/"), 0);
+    assert_eq!(site.count("/dup1"), 0);
+
+    let pages = vec![fixture_page(&at("/dup1"), 200, None)];
+    assert_eq!(sampled_encoding(&site, pages).await.as_deref(), Some(""));
+    assert_eq!(site.count("/dup1"), 1);
+}
