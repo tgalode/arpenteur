@@ -19,11 +19,16 @@ function formatDate(iso: string): string {
 export default function Home({
   onOpen,
   onSettings,
+  onAbout,
 }: {
   onOpen: (domain: string, id: string, running: boolean) => void;
   onSettings: () => void;
+  onAbout: () => void;
 }) {
-  const links = [{ label: t("settings"), onClick: onSettings }];
+  const links = [
+    { label: t("settings"), onClick: onSettings },
+    { label: t("about"), onClick: onAbout },
+  ];
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

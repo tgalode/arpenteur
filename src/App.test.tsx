@@ -89,3 +89,12 @@ test("relancer remonte l’écran : le nouveau crawl affiche sa progression", as
   expect(await screen.findByRole("button", { name: "arrêter" })).toBeTruthy();
   await waitFor(() => expect(screen.queryByRole("button", { name: "relancer" })).toBeNull());
 });
+
+test("à propos s’ouvre depuis l’accueil et on en revient", async () => {
+  vi.mocked(api.listSites).mockResolvedValue([]);
+  render(<App />);
+  await userEvent.click(await screen.findByRole("button", { name: "à propos" }));
+  expect(screen.getByText(/Permission is hereby granted/)).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "retour" }));
+  expect(await screen.findByRole("button", { name: "à propos" })).toBeTruthy();
+});

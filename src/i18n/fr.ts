@@ -200,6 +200,12 @@ export const fr = {
   settings_saved: "réglages enregistrés.",
   settings_errors: "réglages refusés, rien n’a été enregistré :",
   settings_notInteger: "{field} : un nombre entier est attendu.",
+  about: "à propos",
+  about_title: "# à propos",
+  about_summary: "arpenteur parcourt un site, liste ses URL et signale les problèmes de référencement. Les crawls sont enregistrés sur ce poste.",
+  about_thirdParty: "composants tiers",
+  about_engine: "SiteOne Crawler",
+  about_engineIntro: "Moteur de crawl, version 2.5.1, distribué sous licence MIT :",
   settings_notDecimal: "{field} : un nombre décimal est attendu (chiffres, avec une virgule ou un point).",
 } as const;
 

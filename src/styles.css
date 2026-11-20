@@ -748,3 +748,17 @@ select {
 .settings-actions .btn {
   padding: 5px 14px;
 }
+
+.licence {
+  max-height: 320px;
+  overflow: auto;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
