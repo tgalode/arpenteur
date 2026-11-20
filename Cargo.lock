@@ -124,6 +124,7 @@ dependencies = [
  "sha2",
  "siteone-crawler",
  "tokio",
+ "tokio-util",
  "url",
 ]
 

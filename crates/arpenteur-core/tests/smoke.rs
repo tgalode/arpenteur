@@ -3,7 +3,9 @@ mod support;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use arpenteur_core::collector::{CrawlEvents, PageCollector};
 use arpenteur_core::engine::register_builtin_analyzers;
+use arpenteur_core::model::{PageRecord, Progress};
 use arpenteur_core::settings::ASSET_IGNORE_REGEX;
 use siteone_crawler::analysis::analyzer::Analyzer;
 use siteone_crawler::analysis::manager::AnalysisManager;
@@ -11,6 +13,7 @@ use siteone_crawler::analysis::result::url_analysis_result::UrlAnalysisResult;
 use siteone_crawler::engine::manager::Manager;
 use siteone_crawler::options::core_options::{CoreOptions, parse_argv};
 use siteone_crawler::result::visited_url::VisitedUrl;
+use tokio_util::sync::CancellationToken;
 use support::{FixtureSite, Variant, start_fixture_site};
 
 type Captured = Arc<Mutex<Vec<(String, String)>>>;
@@ -134,4 +137,54 @@ async fn url_list_seeds_unlinked_pages() {
     let seed = format!("{}/orphan", site.base);
     crawl(&site, vec![], Some(seed)).await;
     assert!(site.requested("/orphan"));
+}
+
+#[derive(Default)]
+struct RecordingEvents {
+    progress: Mutex<Vec<Progress>>,
+}
+
+impl CrawlEvents for RecordingEvents {
+    fn progress(&self, p: &Progress) {
+        self.progress.lock().unwrap().push(p.clone());
+    }
+}
+
+fn page<'a>(pages: &'a [PageRecord], path: &str) -> &'a PageRecord {
+    pages
+        .iter()
+        .find(|p| p.url.ends_with(path))
+        .unwrap_or_else(|| panic!("page {path} not collected"))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn collector_records_pages_and_progress() {
+    let site = start_fixture_site(Variant::Standard).await;
+    let tmp = std::env::temp_dir().join("arpenteur-smoke-collector");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let options = parse_argv(&base_argv(&site, &tmp)).expect("parse_argv");
+
+    let events = Arc::new(RecordingEvents::default());
+    let (collector, handle) = PageCollector::new(events.clone(), 5, CancellationToken::new());
+    let mut am = AnalysisManager::new();
+    register_builtin_analyzers(&mut am, &options);
+    am.register_analyzer(Box::new(collector));
+    am.auto_activate_analyzers();
+    let mut manager = Manager::new(options, am).expect("manager");
+    manager.run().await.expect("crawl");
+
+    let pages = handle.pages();
+    let progress = events.progress.lock().unwrap();
+    assert!(!handle.was_throttled());
+
+    let home = page(&pages, "/");
+    assert_eq!(home.status, 200);
+    assert_eq!(home.facts.as_ref().unwrap().title.as_deref(), Some("Accueil témoin"));
+    let old = page(&pages, "/old");
+    assert_eq!(old.status, 301);
+    assert!(old.location().unwrap().ends_with("/a"));
+    let img = page(&pages, "/img/big.jpg");
+    assert!(img.facts.is_none() && img.size.unwrap() >= 250_000);
+    assert_eq!(progress.len(), pages.len());
+    assert_eq!(progress.last().unwrap().done as usize, pages.len());
 }
