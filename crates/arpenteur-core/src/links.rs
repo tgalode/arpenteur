@@ -31,7 +31,8 @@ pub fn analyze_links(pages: &[PageRecord], start_url: &str) -> LinkReport {
             }
             continue;
         }
-        if !page.is_html() {
+        // Une page externe atteinte par redirection n'est source d'aucun lien.
+        if !page.is_html() || !is_internal(url) {
             continue;
         }
         let Some(facts) = &page.facts else { continue };
@@ -275,6 +276,21 @@ mod tests {
         assert_eq!(report.depth[&u("/old")], 1);
         assert!(!report.depth.contains_key("https://autre.com/"));
         assert_eq!(report.redirect_chains[&u("/r1")], vec![u("/r2"), "https://autre.com/".to_string()]);
+    }
+
+    #[test]
+    fn external_page_adds_no_inlink_nor_depth() {
+        let pages = vec![
+            page("/", 200).html_links(&[("/go", "go")]),
+            page("/go", 301).location("https://autre.com/landing"),
+            page("https://autre.com/landing", 200).html_links(&[("/orphan", "o"), ("/", "accueil")]),
+            page("/orphan", 200).html_links(&[]),
+        ];
+        let report = analyze_links(&pages, "https://x.fr/");
+        assert!(!report.inlinks.contains_key(&u("/orphan")));
+        assert!(!report.inlinks.contains_key(&u("/")));
+        assert!(!report.depth.contains_key(&u("/orphan")));
+        assert!(!report.depth.contains_key("https://autre.com/landing"));
     }
 
     #[test]

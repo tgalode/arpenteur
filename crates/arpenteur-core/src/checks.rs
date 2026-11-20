@@ -70,10 +70,13 @@ pub fn run_checks(
         out.push(Finding { code, url: url.to_string(), related });
     };
 
+    // Une page externe (atteinte par redirection) reste une ligne du tableau,
+    // sans constat : seules les pages du site sont contrôlées.
     for page in pages {
         let facts = page.facts.as_ref();
+        let internal = is_internal(&page.url);
 
-        if is_html_200(page) {
+        if internal && is_html_200(page) {
             if let Some(facts) = facts {
                 canonical_finding(page, facts.canonical.as_deref(), &by_url, &is_internal)
                     .into_iter()
@@ -86,7 +89,7 @@ pub fn run_checks(
                 }
             }
         }
-        if page.is_html() {
+        if internal && page.is_html() {
             if facts.is_some_and(|f| f.json_ld.iter().any(|b| !b.valid)) {
                 push(FindingCode::JsonLdInvalid, &page.url, vec![]);
             }
@@ -94,7 +97,7 @@ pub fn run_checks(
                 push(FindingCode::Noindex, &page.url, vec![]);
             }
         }
-        if matches!(page.status, 302 | 303 | 307) && is_internal(&page.url) {
+        if matches!(page.status, 302 | 303 | 307) && internal {
             let target = page
                 .location()
                 .and_then(|l| Url::parse(&norm(&page.url)).ok()?.join(l.trim()).ok())
@@ -117,7 +120,7 @@ pub fn run_checks(
         }
     }
 
-    for (first, hops) in &links.redirect_chains {
+    for (first, hops) in links.redirect_chains.iter().filter(|(first, _)| is_internal(first)) {
         push(FindingCode::RedirectChain, first, hops.clone());
     }
 
@@ -156,7 +159,7 @@ pub fn run_checks(
     }
 
     let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for page in pages.iter().filter(|p| is_html_200(p)) {
+    for page in pages.iter().filter(|p| is_html_200(p) && is_internal(&p.url)) {
         if let Some(f) = &page.facts {
             if f.word_count > 0 {
                 groups.entry(&f.text_hash).or_default().push(&page.url);
@@ -692,6 +695,48 @@ mod tests {
         assert_eq!(rows[2].word_count, None);
         assert_eq!(rows[2].depth, None);
         assert!(!rows[2].indexable);
+    }
+
+    #[test]
+    fn external_pages_reached_by_redirect_have_no_finding() {
+        let landing = "https://autre.com/landing";
+        let invalid = "https://autre.com/invalide";
+        let pages = vec![
+            html("/").links(&["/go", "/go2", "/go3"]).hash("meme").rec(),
+            redirect("/go", 301, landing),
+            redirect("/go2", 301, invalid),
+            redirect("/go3", 301, "https://autre.com/r1"),
+            html(landing)
+                .canonical(None)
+                .json_ld(&[])
+                .words(10)
+                .robots("noindex")
+                .hash("meme")
+                .rec(),
+            html(invalid).canonical(Some("https://autre.com/x")).json_ld(&[false]).rec(),
+            redirect("https://autre.com/r1", 301, "https://autre.com/r2"),
+            redirect("https://autre.com/r2", 301, "https://autre.com/r3"),
+        ];
+        let f = check(&pages, &sitemap(&["/"]));
+        assert!(
+            f.iter().all(|x| !x.url.starts_with("https://autre.com")),
+            "{f:?}"
+        );
+        assert!(of(&f, FindingCode::DuplicateContent).is_empty());
+    }
+
+    #[test]
+    fn external_page_linking_to_sitemap_url_does_not_hide_orphan() {
+        let pages = vec![
+            html("/").links(&["/go"]).rec(),
+            redirect("/go", 301, "https://autre.com/landing"),
+            html("https://autre.com/landing").links(&["/orphan"]).rec(),
+            html("/orphan").rec(),
+        ];
+        let links = analyze_links(&pages, START);
+        assert!(!links.inlinks.contains_key(&full("/orphan")));
+        let f = run_checks(&pages, &links, &sitemap(&["/", "/orphan"]), START);
+        assert_eq!(urls_of(&f, FindingCode::OrphanPage), vec![full("/orphan")]);
     }
 
     #[test]
