@@ -10,9 +10,11 @@ use crate::checks::assemble;
 use crate::model::{
     CollectedData, CrawlLocation, CrawlMeta, CrawlResult, CrawlStatus, SiteSummary,
 };
+use crate::siteone::read_siteone;
 
 const META_FILE: &str = "crawl.json";
 const DATA_FILE: &str = "arpenteur.json";
+const SITEONE_FILE: &str = "siteone.json";
 const INTERRUPTED_MESSAGE: &str = "Crawl interrompu par la fermeture de l'application.";
 
 #[derive(Clone, Debug)]
@@ -158,7 +160,10 @@ impl CrawlStore {
 
     pub fn load_result(&self, domain: &str, id: &str) -> io::Result<CrawlResult> {
         let (meta, data) = self.read_crawl(domain, id)?;
-        Ok(assemble(meta, data))
+        let siteone = fs::read_to_string(self.sites_dir().join(domain).join(id).join(SITEONE_FILE))
+            .ok()
+            .and_then(|json| read_siteone(&json));
+        Ok(assemble(meta, data, siteone))
     }
 }
 
@@ -195,7 +200,7 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::CrawlSettings;
+    use crate::model::{CrawlSettings, FindingCode};
     use chrono::{NaiveDate, TimeZone};
 
     fn fixed() -> DateTime<Local> {
@@ -316,6 +321,53 @@ mod tests {
         assert_eq!(data.sitemap.urls, ["https://exemple.fr/a"]);
 
         assert!(store.read_crawl("exemple.fr", "inconnu").is_err());
+    }
+
+    #[test]
+    fn load_result_without_siteone_json_still_works() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CrawlStore::new(tmp.path().to_path_buf());
+        let loc = store.create_crawl("exemple.fr", fixed()).unwrap();
+        store
+            .write_meta(&loc, &meta(&loc.id, "exemple.fr"))
+            .unwrap();
+
+        let result = store.load_result("exemple.fr", &loc.id).unwrap();
+        assert!(
+            result
+                .findings
+                .iter()
+                .all(|f| f.code != FindingCode::HttpsInvalid
+                    && f.code != FindingCode::SecurityHeadersMissing)
+        );
+
+        let dir = tmp.path().join("sites/exemple.fr").join(&loc.id);
+        fs::write(dir.join(SITEONE_FILE), "pas du json").unwrap();
+        assert!(store.load_result("exemple.fr", &loc.id).is_ok());
+    }
+
+    #[test]
+    fn load_result_reads_siteone_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CrawlStore::new(tmp.path().to_path_buf());
+        let loc = store.create_crawl("exemple.fr", fixed()).unwrap();
+        store
+            .write_meta(&loc, &meta(&loc.id, "exemple.fr"))
+            .unwrap();
+        let dir = tmp.path().join("sites/exemple.fr").join(&loc.id);
+        fs::write(
+            dir.join(SITEONE_FILE),
+            r#"{"tables":{"certificate-info":{"rows":[{"info":"Errors","value":"boom"}]}}}"#,
+        )
+        .unwrap();
+
+        let result = store.load_result("exemple.fr", &loc.id).unwrap();
+        let f = result
+            .findings
+            .iter()
+            .find(|f| f.code == FindingCode::HttpsInvalid)
+            .expect("constat HttpsInvalid");
+        assert_eq!(f.url, "https://exemple.fr/");
     }
 
     #[test]

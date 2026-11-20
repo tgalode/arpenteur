@@ -8,6 +8,7 @@ use crate::model::{
     CollectedData, CrawlMeta, CrawlResult, Finding, FindingCode, LinkReport, PageFacts, PageRecord,
     SitemapResult, UrlRow,
 };
+use crate::siteone::{SiteOneSummary, site_findings};
 use crate::urls::{is_same_site, normalize_url};
 
 pub const IMAGE_HEAVY_BYTES: i64 = 204_800;
@@ -384,15 +385,22 @@ pub fn build_rows(pages: &[PageRecord], links: &LinkReport) -> Vec<UrlRow> {
         .collect()
 }
 
-pub fn assemble(meta: CrawlMeta, data: CollectedData) -> CrawlResult {
+pub fn assemble(
+    meta: CrawlMeta,
+    data: CollectedData,
+    siteone: Option<SiteOneSummary>,
+) -> CrawlResult {
     let links = analyze_links(&data.pages, &meta.start_url);
-    let findings = run_checks(
+    let mut findings = run_checks(
         &data.pages,
         &links,
         &data.sitemap,
         &meta.start_url,
         data.start_content_encoding.as_deref(),
     );
+    if let Some(summary) = &siteone {
+        findings.extend(site_findings(summary, &meta.start_url));
+    }
     let rows = build_rows(&data.pages, &links);
     CrawlResult {
         meta,

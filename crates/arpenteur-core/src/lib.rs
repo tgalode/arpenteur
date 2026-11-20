@@ -7,5 +7,6 @@ pub mod links;
 pub mod model;
 pub mod settings;
 pub mod sitemap;
+pub mod siteone;
 pub mod storage;
 pub mod urls;
