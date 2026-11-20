@@ -1,6 +1,6 @@
 # Arpenteur : catalogue des problèmes
 
-Brouillon, version 1 · 20 novembre 2026 · statut : à valider
+Version 1 · 20 novembre 2026 · statut : validé le 20 novembre, sans modification
 
 Ce catalogue alimente le panneau Problèmes du plan 2. Chaque problème a un identifiant stable, un niveau, un titre, une explication et une correction. Les textes sont écrits pour pouvoir figurer tels quels dans un rapport client.
 
