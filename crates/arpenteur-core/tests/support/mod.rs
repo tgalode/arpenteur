@@ -18,7 +18,12 @@ pub enum Variant {
     HugeSitemap,
     TruncatedSitemap,
     RobotsDisallow,
+    /// Chaque page lente (~300 ms) et liée à `LINKED_PAGES` pages.
+    Slow,
 }
+
+/// Pages liées depuis "/" par `Throttled` (toutes en 429) et par chaque page de `Slow`.
+pub const LINKED_PAGES: usize = 25;
 
 pub struct FixtureSite {
     pub base: String,
@@ -92,13 +97,35 @@ fn huge_urlset(base: &str, prefix: &str) -> String {
     )
 }
 
+fn many_links_page() -> Response {
+    let links: String = (0..LINKED_PAGES)
+        .map(|i| format!(r#"<a href="/p{i}">p{i}</a> "#))
+        .collect();
+    html(format!(
+        r#"<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Liens</title></head><body><h1>Liens</h1>{links}</body></html>"#
+    ))
+}
+
 async fn handle(State(st): State<AppState>, uri: Uri) -> Response {
     let path = uri.path().to_string();
     st.requests.lock().unwrap().push(path.clone());
     let base = &st.base;
 
-    if st.variant == Variant::Throttled && path != "/" && path != "/robots.txt" {
+    if st.variant == Variant::Throttled && path == "/" {
+        return many_links_page();
+    }
+    if st.variant == Variant::Throttled && path != "/robots.txt" {
         return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
+    if st.variant == Variant::Slow {
+        return match path.as_str() {
+            "/robots.txt" => text("text/plain", "User-agent: *\nAllow: /\n".to_string()),
+            "/sitemap.xml" => StatusCode::NOT_FOUND.into_response(),
+            _ => {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                many_links_page()
+            }
+        };
     }
 
     match path.as_str() {

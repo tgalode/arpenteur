@@ -143,15 +143,19 @@ async fn execute(
 
     // Annuler le futur arrête la boucle de SiteOne : une URL = une tâche déjà lancée,
     // donc au plus `workers` requêtes en vol se terminent, aucune nouvelle ne part.
+    // `biased` : l'annulation est vue avant que la boucle ne lance une autre tâche.
     let status = tokio::select! {
-        result = manager.run() => match result {
-            Ok(_) => CrawlStatus::Completed,
-            Err(e) => CrawlStatus::Failed { message: e.to_string() },
-        },
+        biased;
         _ = cancel.cancelled() => if handle.was_throttled() {
             CrawlStatus::Throttled
         } else {
             CrawlStatus::Stopped
+        },
+        result = manager.run() => match result {
+            // Seuil atteint sur la dernière URL : la boucle a fini dans le même tour.
+            Ok(_) if handle.was_throttled() => CrawlStatus::Throttled,
+            Ok(_) => CrawlStatus::Completed,
+            Err(e) => CrawlStatus::Failed { message: e.to_string() },
         },
     };
     (status, Some(handle), sitemap)

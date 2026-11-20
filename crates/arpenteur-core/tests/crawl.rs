@@ -130,21 +130,30 @@ fn fast_settings() -> CrawlSettings {
     }
 }
 
-async fn run(
-    variant: Variant,
-    events: impl FnOnce(&CancellationToken) -> Arc<dyn CrawlEvents>,
-) -> (
+type CrawlRun = (
     support::FixtureSite,
     CrawlStore,
     arpenteur_core::model::CrawlLocation,
     CrawlMeta,
     tempfile::TempDir,
-) {
+);
+
+async fn run(
+    variant: Variant,
+    events: impl FnOnce(&CancellationToken) -> Arc<dyn CrawlEvents>,
+) -> CrawlRun {
+    run_with(variant, fast_settings(), events).await
+}
+
+async fn run_with(
+    variant: Variant,
+    settings: CrawlSettings,
+    events: impl FnOnce(&CancellationToken) -> Arc<dyn CrawlEvents>,
+) -> CrawlRun {
     let site = start_fixture_site(variant).await;
     let root = tempfile::tempdir().unwrap();
     let store = CrawlStore::new(root.path().to_path_buf());
     let start = Url::parse(&format!("{}/", site.base)).unwrap();
-    let settings = fast_settings();
     let loc = store
         .create_crawl(start.host_str().unwrap(), chrono::Local::now())
         .unwrap();
@@ -187,9 +196,39 @@ async fn sitemap_seeds_respect_robots_and_asset_filter() {
     }
 }
 
+/// Vérifie que le site n'est plus sollicité une fois `run_crawl` revenu.
+/// SiteOne lance une tâche par URL et l'annulation ne les interrompt pas : au plus
+/// `workers - 1` requêtes déjà lancées arrivent encore après le retour.
+/// Plafond du total, tiré du journal du site : les robots.txt et sitemap.xml
+/// demandés (découverte et SiteOne), "/", `pages` pages au-delà de "/", plus `workers`.
+async fn assert_site_left_alone(site: &support::FixtureSite, workers: u32, pages: usize) {
+    let at_return = site.requests.lock().unwrap().len();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let log = site.requests.lock().unwrap().clone();
+    let late = log.len() - at_return;
+    assert!(
+        late <= workers as usize - 1,
+        "{late} requête(s) après la fin, workers={workers} : {log:?}"
+    );
+    let fixed = log
+        .iter()
+        .filter(|p| *p == "/robots.txt" || *p == "/sitemap.xml")
+        .count();
+    let bound = fixed + 1 + pages + workers as usize;
+    assert!(
+        log.len() <= bound,
+        "{} requêtes pour un plafond de {bound}, workers={workers} : {log:?}",
+        log.len()
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn stop_keeps_collected_pages() {
-    let (_site, store, loc, meta, _root) = run(Variant::Standard, |cancel| {
+    let settings = CrawlSettings {
+        workers: 1,
+        ..fast_settings()
+    };
+    let (site, store, loc, meta, _root) = run_with(Variant::Slow, settings, |cancel| {
         Arc::new(CancelOnFirstProgress(cancel.clone()))
     })
     .await;
@@ -198,14 +237,34 @@ async fn stop_keeps_collected_pages() {
     assert_eq!(m.status, CrawlStatus::Stopped);
     assert!(!data.pages.is_empty());
     assert!(m.finished_at.is_some());
+    // Arrêt au premier résultat, celui de "/" : aucune page de plus n'est due.
+    assert_site_left_alone(&site, 1, 0).await;
+}
+
+async fn assert_throttled_stops(workers: u32) {
+    let settings = CrawlSettings {
+        workers,
+        ..fast_settings()
+    };
+    let threshold = settings.limit_threshold as usize;
+    let (site, store, loc, meta, _root) =
+        run_with(Variant::Throttled, settings, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Throttled, "workers={workers}");
+    let (m, _) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(m.status, CrawlStatus::Throttled, "workers={workers}");
+    assert!(threshold < support::LINKED_PAGES);
+    // Seuil atteint après `threshold` pages en 429, sur LINKED_PAGES liées depuis "/".
+    assert_site_left_alone(&site, workers, threshold).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn throttled_site_stops_crawl() {
-    let (_site, store, loc, meta, _root) = run(Variant::Throttled, |_| Arc::new(NoEvents)).await;
-    assert_eq!(meta.status, CrawlStatus::Throttled);
-    let (m, _) = store.read_crawl(&loc.domain, &loc.id).unwrap();
-    assert_eq!(m.status, CrawlStatus::Throttled);
+    assert_throttled_stops(1).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn throttled_site_stops_crawl_with_two_workers() {
+    assert_throttled_stops(2).await;
 }
 
 fn path_of(url: &str) -> String {
