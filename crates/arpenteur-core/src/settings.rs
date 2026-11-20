@@ -5,10 +5,14 @@ pub const ASSET_IGNORE_REGEX: &str =
 use std::fmt;
 use std::path::Path;
 
+use regex::Regex;
+use siteone_crawler::engine::parsed_url::ParsedUrl;
+use siteone_crawler::engine::robots_txt::RobotsTxt;
 use siteone_crawler::options::core_options::{CoreOptions, parse_argv};
+use siteone_crawler::utils::extract_pcre_regex_pattern;
 use url::Url;
 
-use crate::model::CrawlSettings;
+use crate::model::{CrawlSettings, SitemapResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CrawlError {
@@ -92,6 +96,42 @@ pub fn build_core_options(
     Ok(options)
 }
 
+/// Compile les motifs comme SiteOne (`Crawler::new`) : un motif invalide est ignoré.
+fn compile_patterns<'a>(patterns: impl Iterator<Item = &'a str>) -> Vec<Regex> {
+    patterns
+        .filter_map(|p| Regex::new(&extract_pcre_regex_pattern(p)).ok())
+        .collect()
+}
+
+/// URL du sitemap à donner à SiteOne en graines. SiteOne n'applique ni robots.txt
+/// ni `--include-regex` / `--ignore-regex` aux URL de `--url-list`
+/// (`add_url_to_queue_static`) : on les applique ici, avec ses règles pour un lien.
+pub(crate) fn crawl_seeds(settings: &CrawlSettings, sitemap: &SitemapResult) -> Vec<String> {
+    let include = compile_patterns(settings.include_regex.iter().map(String::as_str));
+    let ignore = compile_patterns(
+        std::iter::once(ASSET_IGNORE_REGEX).chain(settings.ignore_regex.iter().map(String::as_str)),
+    );
+    let robots = match (&sitemap.robots_txt, settings.respect_robots) {
+        (Some(body), true) => Some(RobotsTxt::parse(body)),
+        _ => None,
+    };
+    sitemap
+        .urls
+        .iter()
+        .filter(|url| {
+            let parsed = ParsedUrl::parse(url, None);
+            let full = parsed.get_full_url(true, false);
+            let included = include.is_empty() || include.iter().any(|re| re.is_match(&full));
+            let ignored = ignore.iter().any(|re| re.is_match(&full));
+            // SiteOne ne consulte pas robots.txt pour les fichiers statiques.
+            let allowed = parsed.is_static_file()
+                || robots.as_ref().is_none_or(|r| r.is_allowed(url));
+            included && !ignored && allowed
+        })
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +211,45 @@ mod tests {
         )
         .unwrap();
         assert_eq!(options.url_list_urls, vec!["https://exemple.fr/orphan".to_string()]);
+    }
+
+    #[test]
+    fn crawl_seeds_apply_robots_and_regexes() {
+        let sitemap = SitemapResult {
+            found: true,
+            urls: [
+                "/",
+                "/blog/a",
+                "/blog/admin",
+                "/private/b",
+                "/blog/doc.pdf",
+                "/news/c",
+            ]
+            .iter()
+            .map(|p| format!("https://exemple.fr{p}"))
+            .collect(),
+            robots_txt: Some("User-agent: *\nDisallow: /private\n".to_string()),
+            ..SitemapResult::default()
+        };
+        let seeds = |settings: &CrawlSettings| -> Vec<String> {
+            crawl_seeds(settings, &sitemap)
+                .iter()
+                .map(|u| Url::parse(u).unwrap().path().to_string())
+                .collect()
+        };
+
+        let defaults = CrawlSettings::default();
+        assert_eq!(seeds(&defaults), ["/", "/blog/a", "/blog/admin", "/news/c"]);
+
+        let filtered = CrawlSettings {
+            include_regex: vec!["/blog/".to_string(), "/private/".to_string()],
+            ignore_regex: vec!["/admin".to_string()],
+            ..CrawlSettings::default()
+        };
+        assert_eq!(seeds(&filtered), ["/blog/a"]);
+
+        let no_robots = CrawlSettings { respect_robots: false, ..filtered };
+        assert_eq!(seeds(&no_robots), ["/blog/a", "/private/b"]);
     }
 
     #[test]

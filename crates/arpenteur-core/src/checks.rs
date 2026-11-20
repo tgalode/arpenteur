@@ -351,6 +351,7 @@ mod tests {
             urls: paths.iter().map(|p| full(p)).collect(),
             truncated: false,
             errors: vec![],
+            robots_txt: None,
         }
     }
 

@@ -68,6 +68,7 @@ export interface SitemapResult {
   urls: string[];
   truncated: boolean;
   errors: string[];
+  robotsTxt: string | null;
 }
 
 export interface InLink {

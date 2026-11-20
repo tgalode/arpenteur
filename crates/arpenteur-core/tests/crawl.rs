@@ -32,6 +32,8 @@ async fn reads_sitemap_declared_in_robots() {
     assert!(result.urls.contains(&format!("{}/orphan", site.base)));
     assert_eq!(result.sources, vec![format!("{}/sitemap.xml", site.base)]);
     assert!(!result.truncated);
+    let robots = result.robots_txt.as_deref().unwrap();
+    assert!(robots.contains(&format!("Sitemap: {}/sitemap.xml", site.base)));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -168,6 +170,21 @@ async fn crawl_completes_and_writes_files() {
     }
     assert!(data.sitemap.found);
     assert!(!site.requested("/app.js") && !site.requested("/style.css"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sitemap_seeds_respect_robots_and_asset_filter() {
+    let (site, store, loc, meta, _root) =
+        run(Variant::RobotsDisallow, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    assert!(site.requested("/orphan"));
+    assert!(!site.requested("/private/secret"));
+    assert!(!site.requested("/doc.pdf"));
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    for path in ["/private/secret", "/doc.pdf", "/orphan"] {
+        let url = format!("{}{}", site.base, path);
+        assert!(data.sitemap.urls.contains(&url), "{url}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -75,7 +75,7 @@ use url::Url;
 
 use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
 use crate::model::{CollectedData, CrawlLocation, CrawlMeta, CrawlSettings, CrawlStatus, SitemapResult};
-use crate::settings::{CrawlError, build_core_options, default_user_agent};
+use crate::settings::{CrawlError, build_core_options, crawl_seeds, default_user_agent};
 use crate::sitemap::discover;
 use crate::storage::CrawlStore;
 
@@ -125,7 +125,9 @@ async fn execute(
         return (CrawlStatus::Stopped, None, sitemap);
     }
 
-    let options = match build_core_options(settings, start, &location.dir, sitemap.urls.clone()) {
+    // Les URL écartées restent dans `sitemap.urls` : le contenu du sitemap est un fait.
+    let seeds = crawl_seeds(settings, &sitemap);
+    let options = match build_core_options(settings, start, &location.dir, seeds) {
         Ok(o) => o,
         Err(e) => return (CrawlStatus::Failed { message: e.to_string() }, None, sitemap),
     };

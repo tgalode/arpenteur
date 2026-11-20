@@ -121,6 +121,9 @@ pub struct SitemapResult {
     pub urls: Vec<String>,
     pub truncated: bool,
     pub errors: Vec<String>,
+    /// Corps du robots.txt lu pendant la découverte, `None` s'il est absent ou illisible.
+    #[serde(default)]
+    pub robots_txt: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

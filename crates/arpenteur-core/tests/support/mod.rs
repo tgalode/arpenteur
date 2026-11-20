@@ -17,6 +17,7 @@ pub enum Variant {
     NoSitemap,
     HugeSitemap,
     TruncatedSitemap,
+    RobotsDisallow,
 }
 
 pub struct FixtureSite {
@@ -101,6 +102,10 @@ async fn handle(State(st): State<AppState>, uri: Uri) -> Response {
     }
 
     match path.as_str() {
+        "/robots.txt" if st.variant == Variant::RobotsDisallow => text(
+            "text/plain",
+            format!("User-agent: *\nDisallow: /private\nSitemap: {base}/sitemap.xml\n"),
+        ),
         "/robots.txt" => {
             let sitemap_line = match st.variant {
                 Variant::NoSitemapLine | Variant::NoSitemap => String::new(),
@@ -118,6 +123,10 @@ async fn handle(State(st): State<AppState>, uri: Uri) -> Response {
                 format!(
                     r#"<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{base}/a</loc></url><url><loc>{base}/b</loc></url><url><loc>{base}/c"#
                 ),
+            ),
+            Variant::RobotsDisallow => text(
+                "application/xml",
+                urlset(base, &["/", "/private/secret", "/doc.pdf", "/orphan"]),
             ),
             Variant::HugeSitemap => text(
                 "application/xml",

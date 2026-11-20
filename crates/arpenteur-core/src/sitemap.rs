@@ -131,6 +131,7 @@ pub async fn discover_with_limit(
         urls: Vec::new(),
         truncated: false,
         errors: Vec::new(),
+        robots_txt: None,
     };
     let mut fetcher = Fetcher {
         client,
@@ -149,7 +150,8 @@ pub async fn discover_with_limit(
                         .errors
                         .push(format!("{robots_url} : dépasse {max_file_bytes} octets"));
                 }
-                for line in String::from_utf8_lossy(&fetched.body).lines() {
+                let body = String::from_utf8_lossy(&fetched.body).into_owned();
+                for line in body.lines() {
                     if let Some(value) = sitemap_directive(line) {
                         match robots_url.join(value) {
                             Ok(u) => declared.push(u),
@@ -159,6 +161,7 @@ pub async fn discover_with_limit(
                         }
                     }
                 }
+                result.robots_txt = Some(body);
             }
             Err(FetchError::NotFound) => {}
             Err(FetchError::Other(e)) => result.errors.push(e),

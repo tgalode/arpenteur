@@ -95,7 +95,7 @@ function result(status: CrawlStatus): CrawlResult {
       depth: {},
       redirectChains: {},
     },
-    sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [] },
+    sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [], robotsTxt: null },
   };
 }
 
