@@ -87,30 +87,49 @@ export interface LinkReport {
 }
 
 export type FindingCode =
-  | "canonicalMissing"
-  | "canonicalToOtherUrl"
-  | "canonicalToRedirect"
-  | "canonicalToError"
-  | "canonicalToOtherHost"
-  | "temporaryRedirect"
-  | "redirectChain"
   | "brokenInternalLink"
-  | "imageTooHeavy"
-  | "jsonLdMissing"
-  | "jsonLdInvalid"
-  | "orphanPage"
-  | "notInSitemap"
+  | "serverError"
+  | "canonicalToError"
+  | "canonicalToRedirect"
   | "sitemapUrlError"
-  | "sitemapUrlNonIndexable"
-  | "sitemapNotFound"
+  | "titleMissing"
+  | "httpsInvalid"
+  | "redirectChain"
+  | "temporaryRedirect"
+  | "canonicalMissing"
+  | "canonicalToOtherHost"
+  | "orphanPage"
   | "duplicateContent"
-  | "thinContent"
-  | "noindex";
+  | "titleDuplicate"
+  | "metaDescriptionMissing"
+  | "h1Missing"
+  | "jsonLdInvalid"
+  | "sitemapNotFound"
+  | "sitemapUrlNonIndexable"
+  | "imageMissingAlt"
+  | "imageTooHeavy"
+  | "titleTooLong"
+  | "titleTooShort"
+  | "metaDescriptionTooLong"
+  | "metaDescriptionTooShort"
+  | "metaDescriptionDuplicate"
+  | "h1Multiple"
+  | "headingStructure"
+  | "jsonLdMissing"
+  | "htmlLangMissing"
+  | "securityHeadersMissing"
+  | "phoneNotClickable"
+  | "modernCompressionMissing"
+  | "canonicalToOtherUrl"
+  | "noindex"
+  | "notInSitemap"
+  | "thinContent";
 
 export interface Finding {
   code: FindingCode;
   url: string;
   related: string[];
+  detail: string | null;
 }
 
 export interface UrlRow {
