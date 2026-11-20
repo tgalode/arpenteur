@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use arpenteur_core::engine::run_crawl;
-use arpenteur_core::model::{CrawlResult, CrawlSettings, SiteSummary};
+use arpenteur_core::model::{CrawlMeta, CrawlResult, CrawlSettings, CrawlStatus, SiteSummary};
 use arpenteur_core::settings::normalize_start_url;
 use arpenteur_core::storage::domain_key;
 use chrono::Local;
@@ -9,7 +9,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::events::TauriEvents;
-use crate::state::AppState;
+use crate::state::{AppState, FinishGuard};
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -46,9 +46,38 @@ pub fn start_crawl(
     let store = state.store.clone();
     let events = Arc::new(TauriEvents::new(app.clone()));
     let settings = settings.unwrap_or_default();
+    let started_at = Local::now().to_rfc3339();
     tauri::async_runtime::spawn(async move {
-        let meta = run_crawl(settings, start, store, location, events, cancel).await;
-        app.state::<AppState>().finish();
+        let state = app.state::<AppState>();
+        let _guard = FinishGuard(&state);
+        let inner = tauri::async_runtime::spawn(run_crawl(
+            settings.clone(),
+            start.clone(),
+            store.clone(),
+            location.clone(),
+            events,
+            cancel,
+        ));
+        let meta = match inner.await {
+            Ok(meta) => meta,
+            Err(_) => {
+                let meta = CrawlMeta {
+                    id: location.id.clone(),
+                    domain: location.domain.clone(),
+                    start_url: start.as_str().to_string(),
+                    started_at,
+                    finished_at: Some(Local::now().to_rfc3339()),
+                    status: CrawlStatus::Failed {
+                        message: "Le crawl s'est arrêté sur une erreur interne.".to_string(),
+                    },
+                    settings,
+                    pages: 0,
+                };
+                let _ = store.write_meta(&location, &meta);
+                meta
+            }
+        };
+        state.finish();
         let _ = app.emit("crawl-finished", &meta);
     });
 

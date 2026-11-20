@@ -47,6 +47,15 @@ impl AppState {
     }
 }
 
+/// Libère l'état à la sortie de la portée, panique comprise.
+pub struct FinishGuard<'a>(pub &'a AppState);
+
+impl Drop for FinishGuard<'_> {
+    fn drop(&mut self) {
+        self.0.finish();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,5 +87,17 @@ mod tests {
         let token = state.try_begin().unwrap();
         assert!(state.stop());
         assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn guard_releases_state_even_on_panic() {
+        let (state, _dir) = state();
+        state.try_begin().unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = FinishGuard(&state);
+            panic!("panique simulée dans le crawl");
+        }));
+        assert!(result.is_err());
+        assert!(state.try_begin().is_ok());
     }
 }
