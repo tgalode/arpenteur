@@ -134,10 +134,10 @@ test("la progression met à jour le compteur", async () => {
   expect(await screen.findByText("2 URL traitées · 4 s")).toBeTruthy();
 });
 
-test("Arrêter appelle stopCrawl", async () => {
+test("arrêter appelle stopCrawl", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
   render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} />);
-  await userEvent.click(await screen.findByRole("button", { name: "Arrêter" }));
+  await userEvent.click(await screen.findByRole("button", { name: "arrêter" }));
   expect(api.stopCrawl).toHaveBeenCalled();
 });
 
@@ -148,7 +148,7 @@ test("à la fin, le résultat est chargé et affiché", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValueOnce(result({ kind: "completed" }));
   await act(async () => finishedCb(meta({ kind: "completed" })));
   expect(await screen.findByText("https://exemple.fr/tarifs")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Arrêter" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "arrêter" })).toBeNull();
 });
 
 test("un crawl terminé avant les écouteurs est affiché", async () => {
@@ -170,8 +170,8 @@ test("un clic sur un en-tête trie le tableau", async () => {
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} />);
   await screen.findByText("https://exemple.fr/tarifs");
   expect(firstDataRowUrl()).toBe("https://exemple.fr/");
-  await userEvent.click(screen.getByRole("columnheader", { name: /Profondeur/ }));
-  await userEvent.click(screen.getByRole("columnheader", { name: /Profondeur/ }));
+  await userEvent.click(screen.getByRole("columnheader", { name: /prof\./ }));
+  await userEvent.click(screen.getByRole("columnheader", { name: /prof\./ }));
   expect(firstDataRowUrl()).toBe("https://exemple.fr/tarifs");
 });
 
@@ -187,11 +187,11 @@ test("un clic sur une ligne ouvre le détail avec les liens entrants", async () 
 test("un crawl arrêté affiche son bandeau", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "stopped" }));
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} />);
-  expect(await screen.findByText("Crawl arrêté avant la fin.")).toBeTruthy();
+  expect(await screen.findByText("crawl arrêté avant la fin.")).toBeTruthy();
 });
 
 test("un crawl interrompu conseille de baisser le débit", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "throttled" }));
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} />);
-  expect(await screen.findByText(/Baissez le débit/)).toBeTruthy();
+  expect(await screen.findByText(/baissez le débit/)).toBeTruthy();
 });

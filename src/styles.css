@@ -1,0 +1,150 @@
+:root {
+  --bg: #0d0f12;
+  --panel: #111418;
+  --side: #0f1216;
+  --line: #22262d;
+  --line2: #161a1f;
+  --field: #2d333b;
+  --text: #c9d1d9;
+  --strong: #e6edf3;
+  --dim: #7d8590;
+  --accent: #a3e635;
+  --accent-ink: #0d0f12;
+  --ok: #7ee787;
+  --redir: #79c0ff;
+  --warn: #e3b341;
+  --err: #ff7b72;
+  --sel: #1b2a12;
+  --radius: 4px;
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+.btn {
+  background: transparent;
+  border: 1px solid var(--field);
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  padding: 4px 10px;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--dim);
+  color: var(--strong);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.btn-primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  filter: brightness(1.1);
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.btn:focus-visible,
+.field:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.field {
+  background: var(--bg);
+  border: 1px solid var(--field);
+  border-radius: var(--radius);
+  color: var(--strong);
+  padding: 4px 8px;
+}
+
+.field::placeholder {
+  color: var(--dim);
+}
+
+.tone-ok {
+  color: var(--ok);
+}
+
+.tone-redir {
+  color: var(--redir);
+}
+
+.tone-warn {
+  color: var(--warn);
+}
+
+.tone-err {
+  color: var(--err);
+}
+
+.tone-dim,
+.dim {
+  color: var(--dim);
+}
+
+.strong {
+  color: var(--strong);
+}
+
+::selection {
+  background: var(--sel);
+  color: var(--strong);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--field) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--field);
+  border-radius: var(--radius);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

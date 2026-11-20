@@ -10,3 +10,7 @@ test("formatElapsed", async () => {
   expect(formatElapsed(4200)).toBe("4 s");
   expect(formatElapsed(72000)).toBe("1 min 12 s");
 });
+
+test("pluriel des crawls", () => {
+  expect(t("crawlsMany", { count: 3 })).toBe("3 crawls");
+});
