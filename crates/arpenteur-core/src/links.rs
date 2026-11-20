@@ -52,9 +52,15 @@ pub fn analyze_links(pages: &[PageRecord], start_url: &str) -> LinkReport {
         }
     }
 
+    let internal_redirects: BTreeMap<String, String> = redirects
+        .iter()
+        .filter(|(_, target)| is_internal(target))
+        .map(|(from, to)| (from.clone(), to.clone()))
+        .collect();
+
     LinkReport {
         inlinks,
-        depth: compute_depth(start, &link_edges, &redirects),
+        depth: compute_depth(start, &link_edges, &internal_redirects),
         redirect_chains: compute_chains(&redirects),
     }
 }
@@ -255,6 +261,20 @@ mod tests {
         let report = analyze_links(&pages, "https://x.fr/");
         assert_eq!(report.inlinks["https://www.x.fr/a"].len(), 1);
         assert_eq!(report.depth["https://www.x.fr/a"], 1);
+    }
+
+    #[test]
+    fn redirect_to_external_host_has_no_depth_but_keeps_chain() {
+        let pages = vec![
+            page("/", 200).html_links(&[("/old", "old")]),
+            page("/old", 301).location("https://autre.com/"),
+            page("/r1", 301).location("/r2"),
+            page("/r2", 301).location("https://autre.com/"),
+        ];
+        let report = analyze_links(&pages, "https://x.fr/");
+        assert_eq!(report.depth[&u("/old")], 1);
+        assert!(!report.depth.contains_key("https://autre.com/"));
+        assert_eq!(report.redirect_chains[&u("/r1")], vec![u("/r2"), "https://autre.com/".to_string()]);
     }
 
     #[test]
