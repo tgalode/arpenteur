@@ -241,6 +241,37 @@ async fn stop_keeps_collected_pages() {
     assert_site_left_alone(&site, 1, 0).await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn unreachable_site_fails() {
+    // Port libre puis relâché : personne n'écoute.
+    let port = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    let root = tempfile::tempdir().unwrap();
+    let store = CrawlStore::new(root.path().to_path_buf());
+    let start = Url::parse(&format!("http://127.0.0.1:{port}/")).unwrap();
+    let loc = store
+        .create_crawl(start.host_str().unwrap(), chrono::Local::now())
+        .unwrap();
+    let meta = run_crawl(
+        fast_settings(),
+        start,
+        store.clone(),
+        loc.clone(),
+        Arc::new(NoEvents),
+        CancellationToken::new(),
+    )
+    .await;
+    let expected = CrawlStatus::Failed {
+        message: "Aucune page n'a pu être chargée. Vérifiez l'adresse ou la connexion."
+            .to_string(),
+    };
+    assert_eq!(meta.status, expected);
+    let (m, _) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(m.status, expected);
+}
+
 async fn assert_throttled_stops(workers: u32) {
     let settings = CrawlSettings {
         workers,

@@ -79,6 +79,12 @@ use crate::settings::{CrawlError, build_core_options, crawl_seeds, default_user_
 use crate::sitemap::discover;
 use crate::storage::CrawlStore;
 
+/// Code de sortie de `Manager::run` (manager.rs, `run_post_crawl`) quand aucune
+/// réponse HTTP n'a été reçue : adresse erronée, site injoignable.
+const NO_PAGE_LOADED: i32 = 3;
+const NO_PAGE_LOADED_MESSAGE: &str =
+    "Aucune page n'a pu être chargée. Vérifiez l'adresse ou la connexion.";
+
 fn http_client(settings: &CrawlSettings) -> Result<reqwest::Client, CrawlError> {
     let ua = settings.user_agent.clone().unwrap_or_else(default_user_agent);
     // Le `!` final est un drapeau SiteOne, pas une partie du User-Agent.
@@ -154,6 +160,7 @@ async fn execute(
         result = manager.run() => match result {
             // Seuil atteint sur la dernière URL : la boucle a fini dans le même tour.
             Ok(_) if handle.was_throttled() => CrawlStatus::Throttled,
+            Ok(NO_PAGE_LOADED) => CrawlStatus::Failed { message: NO_PAGE_LOADED_MESSAGE.to_string() },
             Ok(_) => CrawlStatus::Completed,
             Err(e) => CrawlStatus::Failed { message: e.to_string() },
         },
