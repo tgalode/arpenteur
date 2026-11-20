@@ -185,6 +185,21 @@ export const fr = {
   finding_notInSitemap_why: "La page est indexable mais le sitemap ne l'annonce pas.",
   finding_thinContent_title: "Contenu court (moins de 200 mots)",
   finding_thinContent_why: "Peu de texte. C'est normal pour une page contact, à enrichir pour une page de service.",
+  settings: "réglages",
+  settings_title: "# réglages par défaut",
+  settings_intro: "appliqués à chaque nouveau crawl.",
+  settings_workers: "connexions simultanées",
+  settings_rate: "débit (requêtes par seconde)",
+  settings_maxRequests: "limite de requêtes",
+  settings_limitThreshold: "seuil de limitation",
+  settings_respectRobots: "respecter le robots.txt",
+  settings_userAgent: "user-agent (vide : celui d’arpenteur)",
+  settings_include: "motifs à inclure (un par ligne)",
+  settings_ignore: "motifs à ignorer (un par ligne)",
+  settings_save: "enregistrer",
+  settings_saved: "réglages enregistrés.",
+  settings_errors: "réglages refusés, rien n’a été enregistré :",
+  settings_notNumber: "{field} : saisissez un nombre.",
 } as const;
 
 export type FrKey = keyof typeof fr;

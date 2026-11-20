@@ -46,7 +46,7 @@ beforeEach(() => {
 
 test("Accueil affiche le message d’erreur de lancement", async () => {
   vi.mocked(api.startCrawl).mockRejectedValue("Adresse invalide : x");
-  render(<Home onOpen={() => {}} />);
+  render(<Home onOpen={() => {}} onSettings={() => {}} />);
   await userEvent.type(screen.getByRole("textbox"), "x");
   await userEvent.click(screen.getByRole("button", { name: "lancer" }));
   expect(await screen.findByText("Adresse invalide : x")).toBeTruthy();
@@ -55,7 +55,7 @@ test("Accueil affiche le message d’erreur de lancement", async () => {
 test("Accueil ouvre le crawl lancé", async () => {
   vi.mocked(api.startCrawl).mockResolvedValue({ domain: "exemple.fr", id: "abc" });
   const onOpen = vi.fn();
-  render(<Home onOpen={onOpen} />);
+  render(<Home onOpen={onOpen} onSettings={() => {}} />);
   await userEvent.type(screen.getByRole("textbox"), "exemple.fr");
   await userEvent.click(screen.getByRole("button", { name: "lancer" }));
   await waitFor(() => expect(onOpen).toHaveBeenCalledWith("exemple.fr", "abc", true));
@@ -74,7 +74,7 @@ test("Accueil liste les crawls du plus récent au plus ancien", async () => {
   ];
   vi.mocked(api.listSites).mockResolvedValue(sites);
   const onOpen = vi.fn();
-  render(<Home onOpen={onOpen} />);
+  render(<Home onOpen={onOpen} onSettings={() => {}} />);
   const items = await screen.findAllByRole("button", { name: /URL/ });
   expect(items.map((b) => /(\d+) URL/.exec(b.textContent ?? "")?.[1])).toEqual(["22", "33", "11"]);
   expect(items[0].textContent).toContain("terminé");
@@ -94,7 +94,7 @@ test("Accueil rouvre un crawl en cours avec sa progression", async () => {
   ];
   vi.mocked(api.listSites).mockResolvedValue(sites);
   const onOpen = vi.fn();
-  render(<Home onOpen={onOpen} />);
+  render(<Home onOpen={onOpen} onSettings={() => {}} />);
   const items = await screen.findAllByRole("button", { name: /URL/ });
   expect(items[0].textContent).toContain("en cours");
   await userEvent.click(items[0]);
@@ -110,7 +110,7 @@ test("chaque crawl de l’accueil est un bouton « ouvrir » accessible au clavi
       crawls: [meta("a", "2026-01-01T10:00:00Z", 1), meta("b", "2026-02-01T10:00:00Z", 2), meta("c", "2026-03-01T10:00:00Z", 3)],
     },
   ]);
-  render(<Home onOpen={() => {}} />);
+  render(<Home onOpen={() => {}} onSettings={() => {}} />);
   const rows = await screen.findAllByRole("button", { name: /ouvrir/ });
   expect(rows.length).toBe(3);
 });
@@ -123,7 +123,14 @@ test("l’en-tête d’un site affiche le nombre de crawls", async () => {
       crawls: [meta("b", "2026-01-01T10:00:00Z", 1), meta("c", "2026-02-01T10:00:00Z", 2), meta("d", "2026-03-01T10:00:00Z", 3)],
     },
   ]);
-  render(<Home onOpen={() => {}} />);
+  render(<Home onOpen={() => {}} onSettings={() => {}} />);
   expect(await screen.findByText("1 crawl")).toBeTruthy();
   expect(screen.getByText("3 crawls")).toBeTruthy();
+});
+
+test("Accueil : le lien réglages appelle onSettings", async () => {
+  const onSettings = vi.fn();
+  render(<Home onOpen={() => {}} onSettings={onSettings} />);
+  await userEvent.click(screen.getByRole("button", { name: "réglages" }));
+  expect(onSettings).toHaveBeenCalled();
 });

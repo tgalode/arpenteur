@@ -16,7 +16,14 @@ function formatDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : dateFormat.format(d);
 }
 
-export default function Home({ onOpen }: { onOpen: (domain: string, id: string, running: boolean) => void }) {
+export default function Home({
+  onOpen,
+  onSettings,
+}: {
+  onOpen: (domain: string, id: string, running: boolean) => void;
+  onSettings: () => void;
+}) {
+  const links = [{ label: t("settings"), onClick: onSettings }];
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -51,6 +58,13 @@ export default function Home({ onOpen }: { onOpen: (domain: string, id: string, 
       <header className="topbar">
         <h1 className="logo">{t("appName")}</h1>
         <span className="dim">{t("version", { version })}</span>
+        <nav className="topbar-links">
+          {links.map((l) => (
+            <button key={l.label} type="button" className="btn" onClick={l.onClick}>
+              {l.label}
+            </button>
+          ))}
+        </nav>
       </header>
       <div className="home-body">
         <form className="home-new" onSubmit={submit}>

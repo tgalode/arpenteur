@@ -1,6 +1,7 @@
 pub mod canonical_probe;
 pub mod checks;
 pub mod collector;
+pub mod defaults;
 pub mod engine;
 pub mod html;
 pub mod limit_guard;

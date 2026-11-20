@@ -14,6 +14,15 @@ export function startCrawl(url: string, settings?: Partial<CrawlSettings>): Prom
   return invoke<StartedCrawl>("start_crawl", { url, settings: settings ?? null });
 }
 
+export function getSettings(): Promise<CrawlSettings> {
+  return invoke<CrawlSettings>("get_settings");
+}
+
+/** Rejette avec la liste des messages de validation si un réglage est refusé. */
+export function saveSettings(settings: CrawlSettings): Promise<void> {
+  return invoke<void>("save_settings", { settings });
+}
+
 export function stopCrawl(): Promise<boolean> {
   return invoke<boolean>("stop_crawl");
 }

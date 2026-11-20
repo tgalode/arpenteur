@@ -700,3 +700,51 @@ select {
 .detail-problem-detail {
   color: var(--strong);
 }
+
+.topbar-links {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.settings-body {
+  max-width: 560px;
+  padding: 16px 18px;
+}
+
+.settings-intro {
+  margin-bottom: 14px;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-row textarea {
+  font-family: inherit;
+  resize: vertical;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-actions .btn {
+  padding: 5px 14px;
+}

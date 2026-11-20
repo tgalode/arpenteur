@@ -8,12 +8,13 @@ use serde::de::DeserializeOwned;
 
 use crate::checks::assemble;
 use crate::model::{
-    CollectedData, CrawlLocation, CrawlMeta, CrawlResult, CrawlStatus, SiteSummary,
+    CollectedData, CrawlLocation, CrawlMeta, CrawlResult, CrawlSettings, CrawlStatus, SiteSummary,
 };
 use crate::siteone::read_siteone;
 
 const META_FILE: &str = "crawl.json";
 const DATA_FILE: &str = "arpenteur.json";
+const SETTINGS_FILE: &str = "settings.json";
 const SITEONE_FILE: &str = "siteone.json";
 const INTERRUPTED_MESSAGE: &str = "Crawl interrompu par la fermeture de l'application.";
 
@@ -78,6 +79,16 @@ impl CrawlStore {
 
     pub fn write_data(&self, loc: &CrawlLocation, data: &CollectedData) -> io::Result<()> {
         write_json_atomic(&loc.dir.join(DATA_FILE), data)
+    }
+
+    /// Réglages par défaut enregistrés ; valeur par défaut si le fichier est absent ou illisible.
+    pub fn read_default_settings(&self) -> CrawlSettings {
+        read_json(&self.root.join(SETTINGS_FILE)).unwrap_or_default()
+    }
+
+    pub fn write_default_settings(&self, settings: &CrawlSettings) -> io::Result<()> {
+        fs::create_dir_all(&self.root)?;
+        write_json_atomic(&self.root.join(SETTINGS_FILE), settings)
     }
 
     pub fn list_sites(&self) -> io::Result<Vec<SiteSummary>> {

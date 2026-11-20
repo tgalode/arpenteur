@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Crawl } from "./screens/Crawl";
 import Home from "./screens/Home";
+import Settings from "./screens/Settings";
 
-type Nav = { screen: "home" } | { screen: "crawl"; domain: string; id: string; running: boolean };
+type Nav = { screen: "home" } | { screen: "settings" } | { screen: "crawl"; domain: string; id: string; running: boolean };
 
 function App() {
   const [nav, setNav] = useState<Nav>({ screen: "home" });
@@ -19,7 +20,10 @@ function App() {
       />
     );
   }
-  return <Home onOpen={open} />;
+  if (nav.screen === "settings") {
+    return <Settings onBack={() => setNav({ screen: "home" })} />;
+  }
+  return <Home onOpen={open} onSettings={() => setNav({ screen: "settings" })} />;
 }
 
 export default App;

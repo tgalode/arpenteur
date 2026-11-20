@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use arpenteur_core::defaults::validate_settings;
 use arpenteur_core::engine::run_crawl;
 use arpenteur_core::model::{CrawlMeta, CrawlResult, CrawlSettings, CrawlStatus, SiteSummary};
 use arpenteur_core::settings::normalize_start_url;
@@ -27,6 +28,8 @@ pub fn start_crawl(
     settings: Option<CrawlSettings>,
 ) -> Result<StartedCrawl, String> {
     let start = normalize_start_url(&url).map_err(|e| e.to_string())?;
+    let settings = settings.unwrap_or_else(|| state.store.read_default_settings());
+    validate_settings(&settings).map_err(|errors| errors.join(" "))?;
     let running = state
         .try_begin()
         .map_err(|_| "Un crawl est déjà en cours.".to_string())?;
@@ -46,7 +49,6 @@ pub fn start_crawl(
 
     let store = state.store.clone();
     let events = Arc::new(TauriEvents::new(app.clone()));
-    let settings = settings.unwrap_or_default();
     let run_id = running.id;
     let cancel = running.token;
     let started_at = Local::now().to_rfc3339();
@@ -85,6 +87,24 @@ pub fn start_crawl(
     });
 
     Ok(started)
+}
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, AppState>) -> CrawlSettings {
+    state.store.read_default_settings()
+}
+
+/// Refuse sans rien écrire si un réglage est invalide ; renvoie alors tous les messages.
+#[tauri::command]
+pub fn save_settings(
+    state: State<'_, AppState>,
+    settings: CrawlSettings,
+) -> Result<(), Vec<String>> {
+    validate_settings(&settings)?;
+    state
+        .store
+        .write_default_settings(&settings)
+        .map_err(|e| vec![format!("Enregistrement impossible : {e}")])
 }
 
 #[tauri::command]
