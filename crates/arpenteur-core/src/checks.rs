@@ -5,13 +5,29 @@ use url::Url;
 
 use crate::links::analyze_links;
 use crate::model::{
-    CollectedData, CrawlMeta, CrawlResult, Finding, FindingCode, LinkReport, PageRecord,
+    CollectedData, CrawlMeta, CrawlResult, Finding, FindingCode, LinkReport, PageFacts, PageRecord,
     SitemapResult, UrlRow,
 };
 use crate::urls::{is_same_site, normalize_url};
 
 pub const IMAGE_HEAVY_BYTES: i64 = 204_800;
 pub const THIN_CONTENT_WORDS: u32 = 200;
+pub const TITLE_MIN_CHARS: usize = 30;
+pub const TITLE_MAX_CHARS: usize = 60;
+pub const META_MIN_CHARS: usize = 70;
+pub const META_MAX_CHARS: usize = 160;
+
+/// Texte aux espaces réduits (suites, retours à la ligne, bords) ; `None` s'il est vide.
+fn collapsed(text: Option<&str>) -> Option<String> {
+    let joined = text?.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!joined.is_empty()).then_some(joined)
+}
+
+fn has_brotli(page: &PageRecord) -> bool {
+    page.headers
+        .get("content-encoding")
+        .is_some_and(|v| v.split(',').any(|t| t.trim().eq_ignore_ascii_case("br")))
+}
 
 fn norm(raw: &str) -> String {
     normalize_url(raw).unwrap_or_else(|| raw.to_string())
@@ -70,11 +86,12 @@ pub fn run_checks(
     let by_url: BTreeMap<String, &PageRecord> = pages.iter().map(|p| (norm(&p.url), p)).collect();
 
     let mut out: Vec<Finding> = Vec::new();
-    let mut push = |code: FindingCode, url: &str, related: Vec<String>| {
+    let mut push = |code: FindingCode, url: &str, related: Vec<String>, detail: Option<String>| {
         out.push(Finding {
             code,
             url: url.to_string(),
             related,
+            detail,
         });
     };
 
@@ -88,22 +105,76 @@ pub fn run_checks(
             if let Some(facts) = facts {
                 canonical_finding(page, facts.canonical.as_deref(), &by_url, &is_internal)
                     .into_iter()
-                    .for_each(|(code, related)| push(code, &page.url, related));
+                    .for_each(|(code, related)| push(code, &page.url, related, None));
                 if facts.json_ld.is_empty() {
-                    push(FindingCode::JsonLdMissing, &page.url, vec![]);
+                    push(FindingCode::JsonLdMissing, &page.url, vec![], None);
                 }
                 if facts.word_count < THIN_CONTENT_WORDS {
-                    push(FindingCode::ThinContent, &page.url, vec![]);
+                    push(FindingCode::ThinContent, &page.url, vec![], None);
+                }
+                match collapsed(facts.title.as_deref()).map(|t| t.chars().count()) {
+                    None => push(FindingCode::TitleMissing, &page.url, vec![], None),
+                    Some(n) if n < TITLE_MIN_CHARS => {
+                        push(FindingCode::TitleTooShort, &page.url, vec![], None)
+                    }
+                    Some(n) if n > TITLE_MAX_CHARS => {
+                        push(FindingCode::TitleTooLong, &page.url, vec![], None)
+                    }
+                    Some(_) => {}
+                }
+                match collapsed(facts.meta_description.as_deref()).map(|t| t.chars().count()) {
+                    None => push(FindingCode::MetaDescriptionMissing, &page.url, vec![], None),
+                    Some(n) if n < META_MIN_CHARS => push(
+                        FindingCode::MetaDescriptionTooShort,
+                        &page.url,
+                        vec![],
+                        None,
+                    ),
+                    Some(n) if n > META_MAX_CHARS => {
+                        push(FindingCode::MetaDescriptionTooLong, &page.url, vec![], None)
+                    }
+                    Some(_) => {}
+                }
+                match facts.h1.len() {
+                    0 => push(FindingCode::H1Missing, &page.url, vec![], None),
+                    1 => {}
+                    _ => push(FindingCode::H1Multiple, &page.url, vec![], None),
+                }
+                let no_alt: Vec<String> = facts
+                    .images
+                    .iter()
+                    .filter(|i| i.alt.is_none())
+                    .map(|i| i.src.clone())
+                    .collect();
+                if !no_alt.is_empty() {
+                    push(FindingCode::ImageMissingAlt, &page.url, no_alt, None);
+                }
+                if facts.headings.windows(2).any(|w| w[1] > w[0] + 1) {
+                    push(FindingCode::HeadingStructure, &page.url, vec![], None);
+                }
+                if collapsed(facts.lang.as_deref()).is_none() {
+                    push(FindingCode::HtmlLangMissing, &page.url, vec![], None);
+                }
+                if let Some(first) = facts.unlinked_phones.first() {
+                    push(
+                        FindingCode::PhoneNotClickable,
+                        &page.url,
+                        vec![],
+                        Some(first.clone()),
+                    );
                 }
             }
         }
         if internal && page.is_html() {
             if facts.is_some_and(|f| f.json_ld.iter().any(|b| !b.valid)) {
-                push(FindingCode::JsonLdInvalid, &page.url, vec![]);
+                push(FindingCode::JsonLdInvalid, &page.url, vec![], None);
             }
             if is_noindex(page) {
-                push(FindingCode::Noindex, &page.url, vec![]);
+                push(FindingCode::Noindex, &page.url, vec![], None);
             }
+        }
+        if internal && (500..=599).contains(&page.status) {
+            push(FindingCode::ServerError, &page.url, vec![], None);
         }
         if matches!(page.status, 302 | 303 | 307) && internal {
             let target = page
@@ -114,6 +185,7 @@ pub fn run_checks(
                 FindingCode::TemporaryRedirect,
                 &page.url,
                 target.into_iter().collect(),
+                None,
             );
         }
         if page.content_type == "image" && page.size.is_some_and(|s| s > IMAGE_HEAVY_BYTES) {
@@ -132,6 +204,7 @@ pub fn run_checks(
                 FindingCode::ImageTooHeavy,
                 &page.url,
                 users.into_iter().collect(),
+                None,
             );
         }
     }
@@ -141,7 +214,7 @@ pub fn run_checks(
         .iter()
         .filter(|(first, _)| is_internal(first))
     {
-        push(FindingCode::RedirectChain, first, hops.clone());
+        push(FindingCode::RedirectChain, first, hops.clone(), None);
     }
 
     for (target, sources) in &links.inlinks {
@@ -154,6 +227,7 @@ pub fn run_checks(
                 FindingCode::BrokenInternalLink,
                 target,
                 related.into_iter().collect(),
+                None,
             );
         }
     }
@@ -169,12 +243,12 @@ pub fn run_checks(
                 && page.status == 200
                 && links.inlinks.get(url).is_none_or(|v| v.is_empty())
             {
-                push(FindingCode::OrphanPage, &page.url, vec![]);
+                push(FindingCode::OrphanPage, &page.url, vec![], None);
             }
             if is_error(page) {
-                push(FindingCode::SitemapUrlError, &page.url, vec![]);
+                push(FindingCode::SitemapUrlError, &page.url, vec![], None);
             } else if is_html_200(page) && !is_indexable(page) {
-                push(FindingCode::SitemapUrlNonIndexable, &page.url, vec![]);
+                push(FindingCode::SitemapUrlNonIndexable, &page.url, vec![], None);
             }
         }
         for page in pages {
@@ -182,11 +256,11 @@ pub fn run_checks(
                 && is_indexable(page)
                 && !sitemap_urls.contains(&norm(&page.url))
             {
-                push(FindingCode::NotInSitemap, &page.url, vec![]);
+                push(FindingCode::NotInSitemap, &page.url, vec![], None);
             }
         }
     } else {
-        push(FindingCode::SitemapNotFound, start_url, vec![]);
+        push(FindingCode::SitemapNotFound, start_url, vec![], None);
     }
 
     let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
@@ -208,8 +282,57 @@ pub fn run_checks(
                 .map(|m| m.to_string())
                 .collect();
             related.sort();
-            push(FindingCode::DuplicateContent, url, related);
+            push(FindingCode::DuplicateContent, url, related, None);
         }
+    }
+
+    let indexable: Vec<&PageRecord> = pages
+        .iter()
+        .filter(|p| is_internal(&p.url) && is_indexable(p))
+        .collect();
+    for (code, text_of) in [
+        (
+            FindingCode::TitleDuplicate,
+            (|f: &PageFacts| f.title.clone()) as fn(&PageFacts) -> Option<String>,
+        ),
+        (FindingCode::MetaDescriptionDuplicate, |f: &PageFacts| {
+            f.meta_description.clone()
+        }),
+    ] {
+        let mut by_text: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+        for page in &indexable {
+            let text = page
+                .facts
+                .as_ref()
+                .and_then(|f| collapsed(text_of(f).as_deref()));
+            if let Some(text) = text {
+                by_text.entry(text).or_default().push(&page.url);
+            }
+        }
+        for members in by_text.values().filter(|m| m.len() >= 2) {
+            for url in members {
+                let mut related: Vec<String> = members
+                    .iter()
+                    .filter(|m| *m != url)
+                    .map(|m| m.to_string())
+                    .collect();
+                related.sort();
+                push(code.clone(), url, related, None);
+            }
+        }
+    }
+
+    // Constat de site : aucune page HTML 200 interne n'a de quoi être jugée s'il n'y en a pas.
+    let mut html_pages = pages
+        .iter()
+        .filter(|p| is_html_200(p) && is_internal(&p.url));
+    if html_pages.clone().next().is_some() && !html_pages.any(has_brotli) {
+        push(
+            FindingCode::ModernCompressionMissing,
+            start_url,
+            vec![],
+            None,
+        );
     }
 
     out.sort_by_cached_key(|f| (f.code.clone() as usize, f.url.clone()));
@@ -397,6 +520,40 @@ mod tests {
                     alt: None,
                 })
                 .collect();
+            self
+        }
+        fn title(mut self, t: Option<&str>) -> P {
+            self.facts().title = t.map(Into::into);
+            self
+        }
+        fn meta(mut self, m: Option<&str>) -> P {
+            self.facts().meta_description = m.map(Into::into);
+            self
+        }
+        fn h1s(mut self, n: usize) -> P {
+            self.facts().h1 = (0..n).map(|i| format!("h{i}")).collect();
+            self
+        }
+        fn images_alt(mut self, imgs: &[(&str, Option<&str>)]) -> P {
+            self.facts().images = imgs
+                .iter()
+                .map(|(s, a)| Image {
+                    src: full(s),
+                    alt: a.map(Into::into),
+                })
+                .collect();
+            self
+        }
+        fn headings(mut self, levels: &[u8]) -> P {
+            self.facts().headings = levels.to_vec();
+            self
+        }
+        fn lang(mut self, l: Option<&str>) -> P {
+            self.facts().lang = l.map(Into::into);
+            self
+        }
+        fn phones(mut self, p: &[&str]) -> P {
+            self.facts().unlinked_phones = p.iter().map(|s| s.to_string()).collect();
             self
         }
         fn rec(self) -> PageRecord {
@@ -840,5 +997,360 @@ mod tests {
         let mut sorted = keys.clone();
         sorted.sort();
         assert_eq!(keys, sorted);
+    }
+
+    /// Page sans aucun défaut des nouveaux contrôles de page.
+    fn clean(path: &str) -> P {
+        html(path)
+            .title(Some(&"t".repeat(40)))
+            .meta(Some(&"m".repeat(100)))
+            .lang(Some("fr"))
+            .header("content-encoding", "br")
+    }
+
+    fn only(pages: &[PageRecord], code: FindingCode) -> Vec<String> {
+        urls_of(&check(pages, &no_sitemap()), code)
+    }
+
+    #[test]
+    fn server_error_on_internal_5xx() {
+        let pages = vec![
+            other("/boom", 503, "html"),
+            other("/json", 500, "json"),
+            other("/gone", 404, "html"),
+            other("/limite", 599, ""),
+            other("/ok", 200, "html"),
+            other("/lim", 600, ""),
+            other("https://autre.com/x", 500, "html"),
+        ];
+        assert_eq!(
+            only(&pages, FindingCode::ServerError),
+            vec![full("/boom"), full("/json"), full("/limite")]
+        );
+    }
+
+    #[test]
+    fn title_rules() {
+        let pages = vec![
+            clean("/none").title(None).rec(),
+            clean("/blank").title(Some("   ")).rec(),
+            clean("/c29").title(Some(&"a".repeat(29))).rec(),
+            clean("/c30").title(Some(&"a".repeat(30))).rec(),
+            clean("/c60").title(Some(&"a".repeat(60))).rec(),
+            clean("/c61").title(Some(&"a".repeat(61))).rec(),
+            clean("/spaces")
+                .title(Some(&format!("{}   {}", "a".repeat(15), "b".repeat(13))))
+                .rec(),
+        ];
+        assert_eq!(
+            only(&pages, FindingCode::TitleMissing),
+            vec![full("/blank"), full("/none")]
+        );
+        assert_eq!(
+            only(&pages, FindingCode::TitleTooShort),
+            vec![full("/c29"), full("/spaces")]
+        );
+        assert_eq!(only(&pages, FindingCode::TitleTooLong), vec![full("/c61")]);
+    }
+
+    #[test]
+    fn meta_description_rules() {
+        let m = |n: usize| Some("m".repeat(n));
+        let pages = vec![
+            clean("/none").meta(None).rec(),
+            clean("/c69").meta(m(69).as_deref()).rec(),
+            clean("/c70").meta(m(70).as_deref()).rec(),
+            clean("/c160").meta(m(160).as_deref()).rec(),
+            clean("/c161").meta(m(161).as_deref()).rec(),
+        ];
+        assert_eq!(
+            only(&pages, FindingCode::MetaDescriptionMissing),
+            vec![full("/none")]
+        );
+        assert_eq!(
+            only(&pages, FindingCode::MetaDescriptionTooShort),
+            vec![full("/c69")]
+        );
+        assert_eq!(
+            only(&pages, FindingCode::MetaDescriptionTooLong),
+            vec![full("/c161")]
+        );
+    }
+
+    #[test]
+    fn h1_rules() {
+        let pages = vec![
+            clean("/zero").h1s(0).rec(),
+            clean("/one").h1s(1).rec(),
+            clean("/two").h1s(2).rec(),
+        ];
+        assert_eq!(only(&pages, FindingCode::H1Missing), vec![full("/zero")]);
+        assert_eq!(only(&pages, FindingCode::H1Multiple), vec![full("/two")]);
+    }
+
+    #[test]
+    fn duplicates_only_among_indexable_pages() {
+        let t = Some("Un titre assez long pour passer les bornes");
+        let m =
+            Some("Une description suffisamment longue pour passer les bornes de longueur, oui.");
+        let pages = vec![
+            clean("/a").title(t).meta(m).rec(),
+            clean("/b").title(t).meta(m).rec(),
+            clean("/c")
+                .title(Some("Titre unique de trente caracteres ok"))
+                .rec(),
+        ];
+        let f = check(&pages, &no_sitemap());
+        let dup = of(&f, FindingCode::TitleDuplicate);
+        assert_eq!(dup.len(), 2);
+        assert_eq!(dup[0].url, full("/a"));
+        assert_eq!(dup[0].related, vec![full("/b")]);
+        assert_eq!(dup[1].related, vec![full("/a")]);
+        let dup = of(&f, FindingCode::MetaDescriptionDuplicate);
+        assert_eq!(dup.len(), 2);
+        assert_eq!(dup[0].related, vec![full("/b")]);
+
+        // une page en noindex n'est pas indexable : plus de doublon
+        let pages = vec![
+            clean("/a").title(t).meta(m).rec(),
+            clean("/b").title(t).meta(m).robots("noindex").rec(),
+        ];
+        let f = check(&pages, &no_sitemap());
+        assert!(of(&f, FindingCode::TitleDuplicate).is_empty());
+        assert!(of(&f, FindingCode::MetaDescriptionDuplicate).is_empty());
+
+        // titres absents : pas un doublon
+        let pages = vec![
+            clean("/a").title(None).meta(None).rec(),
+            clean("/b").title(None).meta(None).rec(),
+        ];
+        let f = check(&pages, &no_sitemap());
+        assert!(of(&f, FindingCode::TitleDuplicate).is_empty());
+        assert!(of(&f, FindingCode::MetaDescriptionDuplicate).is_empty());
+    }
+
+    #[test]
+    fn image_missing_alt_ignores_decorative() {
+        let pages = vec![
+            clean("/a")
+                .images_alt(&[
+                    ("/i.png", None),
+                    ("/j.png", Some("")),
+                    ("/k.png", Some("chat")),
+                ])
+                .rec(),
+            clean("/b").images_alt(&[("/j.png", Some(""))]).rec(),
+        ];
+        let f = check(&pages, &no_sitemap());
+        let found = of(&f, FindingCode::ImageMissingAlt);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].url, full("/a"));
+        assert_eq!(found[0].related, vec![full("/i.png")]);
+    }
+
+    #[test]
+    fn heading_structure_detects_skips() {
+        let pages = vec![
+            clean("/skip").headings(&[1, 3]).rec(),
+            clean("/ok").headings(&[1, 2, 3, 2]).rec(),
+            clean("/down").headings(&[2, 3]).rec(),
+            clean("/up").headings(&[1, 2, 3, 1, 2]).rec(),
+            clean("/none").headings(&[]).rec(),
+        ];
+        assert_eq!(
+            only(&pages, FindingCode::HeadingStructure),
+            vec![full("/skip")]
+        );
+    }
+
+    #[test]
+    fn html_lang_missing() {
+        let pages = vec![
+            clean("/none").lang(None).rec(),
+            clean("/blank").lang(Some(" ")).rec(),
+            clean("/fr").lang(Some("fr")).rec(),
+        ];
+        assert_eq!(
+            only(&pages, FindingCode::HtmlLangMissing),
+            vec![full("/blank"), full("/none")]
+        );
+    }
+
+    #[test]
+    fn phone_not_clickable() {
+        let pages = vec![
+            clean("/tel")
+                .phones(&["01 23 45 67 89", "02 34 56 78 90"])
+                .rec(),
+            clean("/ok").phones(&[]).rec(),
+        ];
+        let f = check(&pages, &no_sitemap());
+        let found = of(&f, FindingCode::PhoneNotClickable);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].url, full("/tel"));
+        assert_eq!(found[0].detail.as_deref(), Some("01 23 45 67 89"));
+    }
+
+    #[test]
+    fn brotli_missing_is_one_site_finding() {
+        let gz = |p: &str| clean(p).header("content-encoding", "gzip").rec();
+        let pages = vec![gz("/a"), gz("/b"), other("/gone", 404, "html")];
+        let f = check(&pages, &no_sitemap());
+        let found = of(&f, FindingCode::ModernCompressionMissing);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].url, START);
+
+        let pages = vec![gz("/a"), clean("/b").header("content-encoding", "br").rec()];
+        assert!(only(&pages, FindingCode::ModernCompressionMissing).is_empty());
+        let pages = vec![clean("/a").header("content-encoding", "gzip, br").rec()];
+        assert!(only(&pages, FindingCode::ModernCompressionMissing).is_empty());
+
+        // aucune page HTML 200 interne : rien à juger
+        let pages = vec![other("/gone", 404, "html")];
+        assert!(only(&pages, FindingCode::ModernCompressionMissing).is_empty());
+    }
+
+    #[test]
+    fn checks_only_internal_html_200() {
+        let bad = |url: &str, status: i32| {
+            let mut p = html(url)
+                .title(None)
+                .meta(None)
+                .h1s(0)
+                .lang(None)
+                .headings(&[1, 3])
+                .phones(&["01 23 45 67 89"])
+                .images_alt(&[("/i.png", None)])
+                .rec();
+            p.status = status;
+            p
+        };
+        let pages = vec![bad("https://autre.com/a", 200), bad("/gone", 404)];
+        let f = check(&pages, &no_sitemap());
+        for code in [
+            FindingCode::TitleMissing,
+            FindingCode::MetaDescriptionMissing,
+            FindingCode::H1Missing,
+            FindingCode::HtmlLangMissing,
+            FindingCode::HeadingStructure,
+            FindingCode::PhoneNotClickable,
+            FindingCode::ImageMissingAlt,
+            FindingCode::ModernCompressionMissing,
+        ] {
+            assert!(of(&f, code.clone()).is_empty(), "{code:?}");
+        }
+    }
+
+    #[test]
+    fn findings_without_detail_load_from_older_saves() {
+        let f: Finding =
+            serde_json::from_str(r#"{"code":"noindex","url":"https://x.fr/","related":[]}"#)
+                .unwrap();
+        assert_eq!(f.detail, None);
+    }
+
+    /// Match exhaustif : ajouter une variante sans l'inscrire ici ne compile plus.
+    fn declared_index(code: &FindingCode) -> usize {
+        use FindingCode::*;
+        match code {
+            CanonicalMissing => 0,
+            CanonicalToOtherUrl => 1,
+            CanonicalToRedirect => 2,
+            CanonicalToError => 3,
+            CanonicalToOtherHost => 4,
+            TemporaryRedirect => 5,
+            RedirectChain => 6,
+            BrokenInternalLink => 7,
+            ImageTooHeavy => 8,
+            JsonLdMissing => 9,
+            JsonLdInvalid => 10,
+            OrphanPage => 11,
+            NotInSitemap => 12,
+            SitemapUrlError => 13,
+            SitemapUrlNonIndexable => 14,
+            SitemapNotFound => 15,
+            DuplicateContent => 16,
+            ThinContent => 17,
+            Noindex => 18,
+            ServerError => 19,
+            TitleMissing => 20,
+            TitleTooLong => 21,
+            TitleTooShort => 22,
+            MetaDescriptionMissing => 23,
+            MetaDescriptionTooLong => 24,
+            MetaDescriptionTooShort => 25,
+            H1Missing => 26,
+            H1Multiple => 27,
+            TitleDuplicate => 28,
+            MetaDescriptionDuplicate => 29,
+            ImageMissingAlt => 30,
+            HeadingStructure => 31,
+            HtmlLangMissing => 32,
+            PhoneNotClickable => 33,
+            ModernCompressionMissing => 34,
+            HttpsInvalid => 35,
+            SecurityHeadersMissing => 36,
+        }
+    }
+
+    #[test]
+    fn finding_codes_match_shared_list() {
+        use FindingCode::*;
+        let all = [
+            CanonicalMissing,
+            CanonicalToOtherUrl,
+            CanonicalToRedirect,
+            CanonicalToError,
+            CanonicalToOtherHost,
+            TemporaryRedirect,
+            RedirectChain,
+            BrokenInternalLink,
+            ImageTooHeavy,
+            JsonLdMissing,
+            JsonLdInvalid,
+            OrphanPage,
+            NotInSitemap,
+            SitemapUrlError,
+            SitemapUrlNonIndexable,
+            SitemapNotFound,
+            DuplicateContent,
+            ThinContent,
+            Noindex,
+            ServerError,
+            TitleMissing,
+            TitleTooLong,
+            TitleTooShort,
+            MetaDescriptionMissing,
+            MetaDescriptionTooLong,
+            MetaDescriptionTooShort,
+            H1Missing,
+            H1Multiple,
+            TitleDuplicate,
+            MetaDescriptionDuplicate,
+            ImageMissingAlt,
+            HeadingStructure,
+            HtmlLangMissing,
+            PhoneNotClickable,
+            ModernCompressionMissing,
+            HttpsInvalid,
+            SecurityHeadersMissing,
+        ];
+        for (i, code) in all.iter().enumerate() {
+            assert_eq!(declared_index(code), i, "ordre de déclaration : {code:?}");
+            assert_eq!(code.clone() as usize, i);
+        }
+        let serialized: Vec<String> = all
+            .iter()
+            .map(|c| {
+                serde_json::to_value(c)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        let shared: Vec<String> =
+            serde_json::from_str(include_str!("../../../src/lib/finding-codes.json")).unwrap();
+        assert_eq!(serialized, shared);
     }
 }

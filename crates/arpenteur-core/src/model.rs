@@ -170,6 +170,24 @@ pub enum FindingCode {
     DuplicateContent,
     ThinContent,
     Noindex,
+    ServerError,
+    TitleMissing,
+    TitleTooLong,
+    TitleTooShort,
+    MetaDescriptionMissing,
+    MetaDescriptionTooLong,
+    MetaDescriptionTooShort,
+    H1Missing,
+    H1Multiple,
+    TitleDuplicate,
+    MetaDescriptionDuplicate,
+    ImageMissingAlt,
+    HeadingStructure,
+    HtmlLangMissing,
+    PhoneNotClickable,
+    ModernCompressionMissing,
+    HttpsInvalid,
+    SecurityHeadersMissing,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -178,6 +196,8 @@ pub struct Finding {
     pub code: FindingCode,
     pub url: String,
     pub related: Vec<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
