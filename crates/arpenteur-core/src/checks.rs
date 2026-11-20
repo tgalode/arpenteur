@@ -79,6 +79,7 @@ pub fn run_checks(
     sitemap: &SitemapResult,
     start_url: &str,
     start_content_encoding: Option<&str>,
+    facts_version: u32,
 ) -> Vec<Finding> {
     let start = Url::parse(&norm(start_url)).ok();
     let is_internal = |raw: &str| match (&start, Url::parse(&norm(raw))) {
@@ -154,7 +155,8 @@ pub fn run_checks(
                 if facts.headings.windows(2).any(|w| w[1] > w[0] + 1) {
                     push(FindingCode::HeadingStructure, &page.url, vec![], None);
                 }
-                if collapsed(facts.lang.as_deref()).is_none() {
+                // Avant la version 2 la langue n'était pas relevée : `None` ne dit rien.
+                if facts_version >= 2 && collapsed(facts.lang.as_deref()).is_none() {
                     push(FindingCode::HtmlLangMissing, &page.url, vec![], None);
                 }
                 if let Some(first) = facts.unlinked_phones.first() {
@@ -397,6 +399,7 @@ pub fn assemble(
         &data.sitemap,
         &meta.start_url,
         data.start_content_encoding.as_deref(),
+        data.facts_version,
     );
     if let Some(summary) = &siteone {
         findings.extend(site_findings(summary, &meta.start_url));
@@ -415,7 +418,7 @@ pub fn assemble(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CollectedData, Image, JsonLd, Link, PageFacts};
+    use crate::model::{CollectedData, FACTS_VERSION, Image, JsonLd, Link, PageFacts};
 
     const BASE: &str = "https://x.fr";
     const START: &str = "https://x.fr/";
@@ -590,7 +593,7 @@ mod tests {
 
     fn check_from(pages: &[PageRecord], sm: &SitemapResult, start: &str) -> Vec<Finding> {
         let links = analyze_links(pages, start);
-        run_checks(pages, &links, sm, start, None)
+        run_checks(pages, &links, sm, start, None, FACTS_VERSION)
     }
 
     fn check(pages: &[PageRecord], sm: &SitemapResult) -> Vec<Finding> {
@@ -990,7 +993,14 @@ mod tests {
         ];
         let links = analyze_links(&pages, START);
         assert!(!links.inlinks.contains_key(&full("/orphan")));
-        let f = run_checks(&pages, &links, &sitemap(&["/", "/orphan"]), START, None);
+        let f = run_checks(
+            &pages,
+            &links,
+            &sitemap(&["/", "/orphan"]),
+            START,
+            None,
+            FACTS_VERSION,
+        );
         assert_eq!(urls_of(&f, FindingCode::OrphanPage), vec![full("/orphan")]);
     }
 
@@ -1208,7 +1218,7 @@ mod tests {
         let pages = vec![clean("/a").rec(), other("/gone", 404, "html")];
         let with = |enc: Option<&str>| {
             let links = analyze_links(&pages, START);
-            run_checks(&pages, &links, &no_sitemap(), START, enc)
+            run_checks(&pages, &links, &no_sitemap(), START, enc, FACTS_VERSION)
         };
 
         let f = with(Some("gzip"));
@@ -1230,6 +1240,28 @@ mod tests {
                 "{enc:?}"
             );
         }
+    }
+
+    #[test]
+    fn missing_lang_is_reported_only_from_facts_version_2() {
+        let pages = vec![html("/").lang(None).rec()];
+        let links = analyze_links(&pages, START);
+        let run = |version: u32| {
+            run_checks(&pages, &links, &no_sitemap(), START, None, version)
+                .iter()
+                .any(|f| f.code == FindingCode::HtmlLangMissing)
+        };
+        assert!(!run(0));
+        assert!(!run(1));
+        assert!(run(2));
+    }
+
+    #[test]
+    fn collected_data_without_facts_version_loads_as_zero() {
+        let mut json = serde_json::to_value(CollectedData::default()).unwrap();
+        json.as_object_mut().unwrap().remove("factsVersion");
+        let data: CollectedData = serde_json::from_value(json).unwrap();
+        assert_eq!(data.facts_version, 0);
     }
 
     #[test]

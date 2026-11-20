@@ -76,7 +76,8 @@ use url::Url;
 use crate::canonical_probe::{probe_client, run_post_crawl_probes};
 use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
 use crate::model::{
-    CollectedData, CrawlLocation, CrawlMeta, CrawlSettings, CrawlStatus, SitemapResult,
+    CollectedData, CrawlLocation, CrawlMeta, CrawlSettings, CrawlStatus, FACTS_VERSION,
+    SitemapResult,
 };
 use crate::settings::{CrawlError, build_core_options, crawl_seeds, plain_user_agent};
 use crate::sitemap::discover;
@@ -250,6 +251,7 @@ pub async fn run_crawl(
         &CollectedData {
             pages,
             sitemap,
+            facts_version: FACTS_VERSION,
             start_content_encoding,
         },
     ) {

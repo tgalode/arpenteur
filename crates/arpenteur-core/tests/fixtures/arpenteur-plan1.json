@@ -1,0 +1,142 @@
+{
+ "pages": [
+  {
+   "url": "https://www.exemple.fr/",
+   "status": 200,
+   "contentType": "html",
+   "size": 5120,
+   "elapsedMs": 50,
+   "headers": {
+    "content-type": "text/html",
+    "server": "nginx",
+    "strict-transport-security": "max-age=31536000"
+   },
+   "facts": {
+    "title": "Accueil",
+    "metaDescription": null,
+    "h1": [
+     "Accueil"
+    ],
+    "canonical": "https://www.exemple.fr/",
+    "metaRobots": "index, follow",
+    "links": [
+     {
+      "href": "https://www.exemple.fr/a",
+      "anchor": "Page A",
+      "nofollow": false
+     },
+     {
+      "href": "https://www.exemple.fr/ancienne",
+      "anchor": "Ancienne",
+      "nofollow": false
+     },
+     {
+      "href": "https://www.exemple.fr/absente",
+      "anchor": "Absente",
+      "nofollow": false
+     }
+    ],
+    "images": [
+     {
+      "src": "https://www.exemple.fr/images/fleur.png",
+      "alt": ""
+     },
+     {
+      "src": "https://www.exemple.fr/images/logo.png",
+      "alt": "Logo"
+     }
+    ],
+    "jsonLd": [
+     {
+      "valid": true,
+      "types": [
+       "Store"
+      ]
+     }
+    ],
+    "wordCount": 400,
+    "textHash": "hAccueil"
+   }
+  },
+  {
+   "url": "https://www.exemple.fr/a",
+   "status": 200,
+   "contentType": "html",
+   "size": 4096,
+   "elapsedMs": 40,
+   "headers": {
+    "content-type": "text/html",
+    "server": "nginx",
+    "strict-transport-security": "max-age=31536000"
+   },
+   "facts": {
+    "title": "Accueil",
+    "metaDescription": "Une description de la page A qui fait bien plus de soixante-dix caractères pour passer le seuil.",
+    "h1": [
+     "Page A"
+    ],
+    "canonical": "https://www.exemple.fr/a",
+    "metaRobots": "index, follow",
+    "links": [
+     {
+      "href": "https://www.exemple.fr/",
+      "anchor": "Accueil",
+      "nofollow": false
+     }
+    ],
+    "images": [
+     {
+      "src": "https://www.exemple.fr/images/fleur.png",
+      "alt": ""
+     },
+     {
+      "src": "https://www.exemple.fr/images/logo.png",
+      "alt": "Logo"
+     }
+    ],
+    "jsonLd": [
+     {
+      "valid": true,
+      "types": [
+       "Store"
+      ]
+     }
+    ],
+    "wordCount": 400,
+    "textHash": "hAccueil"
+   }
+  },
+  {
+   "url": "https://www.exemple.fr/ancienne",
+   "status": 301,
+   "contentType": "redirect",
+   "size": 91,
+   "elapsedMs": 20,
+   "headers": {
+    "content-type": "text/html",
+    "location": "/a"
+   },
+   "facts": null
+  },
+  {
+   "url": "https://www.exemple.fr/absente",
+   "status": 404,
+   "contentType": "html",
+   "size": 300,
+   "elapsedMs": 20,
+   "headers": {
+    "content-type": "text/html",
+    "server": "nginx",
+    "strict-transport-security": "max-age=31536000"
+   },
+   "facts": null
+  }
+ ],
+ "sitemap": {
+  "found": false,
+  "sources": [],
+  "urls": [],
+  "truncated": false,
+  "errors": []
+ }
+}

@@ -239,11 +239,17 @@ pub struct CrawlMeta {
     pub pages: u32,
 }
 
+/// Version des faits collectés par page : 2 depuis que la langue de la page est relevée.
+pub const FACTS_VERSION: u32 = 2;
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectedData {
     pub pages: Vec<PageRecord>,
     pub sitemap: SitemapResult,
+    /// 0 pour un fichier écrit avant ce champ : certains faits n'y ont jamais été relevés.
+    #[serde(default)]
+    pub facts_version: u32,
     /// `None` : non observé ; `Some("")` : aucun `Content-Encoding` reçu.
     #[serde(default)]
     pub start_content_encoding: Option<String>,
