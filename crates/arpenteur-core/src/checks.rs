@@ -5,8 +5,8 @@ use url::Url;
 
 use crate::links::analyze_links;
 use crate::model::{
-    CollectedData, CrawlMeta, CrawlResult, Finding, FindingCode, LinkReport, PageFacts, PageRecord,
-    SitemapResult, UrlRow,
+    CollectedData, CrawlMeta, CrawlResult, CrawlStatus, FACTS_VERSION, Finding, FindingCode,
+    LinkReport, PageFacts, PageRecord, SitemapResult, UrlRow,
 };
 use crate::siteone::{SiteOneSummary, site_findings};
 use crate::urls::{is_same_site, normalize_url};
@@ -36,7 +36,11 @@ fn norm(raw: &str) -> String {
 
 /// `ERROR_SKIPPED` (-6) : SiteOne n'a pas fait la requête (trop de réponses
 /// non-200 pour ce nom de fichier), ce n'est pas une erreur de la page.
-fn is_error(page: &PageRecord) -> bool {
+/// Sur un crawl limité, 503 et 429 sont la réponse du serveur à notre débit.
+fn is_error(page: &PageRecord, throttled: bool) -> bool {
+    if throttled && matches!(page.status, 503 | 429) {
+        return false;
+    }
     page.status >= 400 || (page.status < 0 && page.status != ERROR_SKIPPED)
 }
 
@@ -73,14 +77,46 @@ pub fn is_indexable(page: &PageRecord) -> bool {
     }
 }
 
-pub fn run_checks(
-    pages: &[PageRecord],
-    links: &LinkReport,
-    sitemap: &SitemapResult,
-    start_url: &str,
-    start_content_encoding: Option<&str>,
-    facts_version: u32,
-) -> Vec<Finding> {
+pub struct CheckInput<'a> {
+    pub pages: &'a [PageRecord],
+    pub links: &'a LinkReport,
+    pub sitemap: &'a SitemapResult,
+    pub start_url: &'a str,
+    pub start_content_encoding: Option<&'a str>,
+    pub facts_version: u32,
+    /// Crawl limité par le serveur : ses 503 et 429 ne sont pas des erreurs du site.
+    pub throttled: bool,
+}
+
+impl<'a> CheckInput<'a> {
+    pub fn new(
+        pages: &'a [PageRecord],
+        links: &'a LinkReport,
+        sitemap: &'a SitemapResult,
+        start_url: &'a str,
+    ) -> Self {
+        Self {
+            pages,
+            links,
+            sitemap,
+            start_url,
+            start_content_encoding: None,
+            facts_version: FACTS_VERSION,
+            throttled: false,
+        }
+    }
+}
+
+pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
+    let CheckInput {
+        pages,
+        links,
+        sitemap,
+        start_url,
+        start_content_encoding,
+        facts_version,
+        throttled,
+    } = *input;
     let start = Url::parse(&norm(start_url)).ok();
     let is_internal = |raw: &str| match (&start, Url::parse(&norm(raw))) {
         (Some(s), Ok(t)) => is_same_site(s, &t),
@@ -106,42 +142,51 @@ pub fn run_checks(
 
         if internal && is_html_200(page) {
             if let Some(facts) = facts {
-                canonical_finding(page, facts.canonical.as_deref(), &by_url, &is_internal)
-                    .into_iter()
-                    .for_each(|(code, related)| push(code, &page.url, related, None));
+                canonical_finding(
+                    page,
+                    facts.canonical.as_deref(),
+                    &by_url,
+                    &is_internal,
+                    throttled,
+                )
+                .into_iter()
+                .for_each(|(code, related)| push(code, &page.url, related, None));
                 if facts.json_ld.is_empty() {
                     push(FindingCode::JsonLdMissing, &page.url, vec![], None);
                 }
                 if facts.word_count < THIN_CONTENT_WORDS {
                     push(FindingCode::ThinContent, &page.url, vec![], None);
                 }
-                match collapsed(facts.title.as_deref()).map(|t| t.chars().count()) {
-                    None => push(FindingCode::TitleMissing, &page.url, vec![], None),
-                    Some(n) if n < TITLE_MIN_CHARS => {
-                        push(FindingCode::TitleTooShort, &page.url, vec![], None)
+                // Une page en noindex n'a pas à être optimisée pour la recherche.
+                if !is_noindex(page) {
+                    match collapsed(facts.title.as_deref()).map(|t| t.chars().count()) {
+                        None => push(FindingCode::TitleMissing, &page.url, vec![], None),
+                        Some(n) if n < TITLE_MIN_CHARS => {
+                            push(FindingCode::TitleTooShort, &page.url, vec![], None)
+                        }
+                        Some(n) if n > TITLE_MAX_CHARS => {
+                            push(FindingCode::TitleTooLong, &page.url, vec![], None)
+                        }
+                        Some(_) => {}
                     }
-                    Some(n) if n > TITLE_MAX_CHARS => {
-                        push(FindingCode::TitleTooLong, &page.url, vec![], None)
+                    match collapsed(facts.meta_description.as_deref()).map(|t| t.chars().count()) {
+                        None => push(FindingCode::MetaDescriptionMissing, &page.url, vec![], None),
+                        Some(n) if n < META_MIN_CHARS => push(
+                            FindingCode::MetaDescriptionTooShort,
+                            &page.url,
+                            vec![],
+                            None,
+                        ),
+                        Some(n) if n > META_MAX_CHARS => {
+                            push(FindingCode::MetaDescriptionTooLong, &page.url, vec![], None)
+                        }
+                        Some(_) => {}
                     }
-                    Some(_) => {}
-                }
-                match collapsed(facts.meta_description.as_deref()).map(|t| t.chars().count()) {
-                    None => push(FindingCode::MetaDescriptionMissing, &page.url, vec![], None),
-                    Some(n) if n < META_MIN_CHARS => push(
-                        FindingCode::MetaDescriptionTooShort,
-                        &page.url,
-                        vec![],
-                        None,
-                    ),
-                    Some(n) if n > META_MAX_CHARS => {
-                        push(FindingCode::MetaDescriptionTooLong, &page.url, vec![], None)
+                    match facts.h1.len() {
+                        0 => push(FindingCode::H1Missing, &page.url, vec![], None),
+                        1 => {}
+                        _ => push(FindingCode::H1Multiple, &page.url, vec![], None),
                     }
-                    Some(_) => {}
-                }
-                match facts.h1.len() {
-                    0 => push(FindingCode::H1Missing, &page.url, vec![], None),
-                    1 => {}
-                    _ => push(FindingCode::H1Multiple, &page.url, vec![], None),
                 }
                 let no_alt: Vec<String> = facts
                     .images
@@ -177,7 +222,7 @@ pub fn run_checks(
                 push(FindingCode::Noindex, &page.url, vec![], None);
             }
         }
-        if internal && (500..=599).contains(&page.status) {
+        if internal && (500..=599).contains(&page.status) && is_error(page, throttled) {
             push(FindingCode::ServerError, &page.url, vec![], None);
         }
         if matches!(page.status, 302 | 303 | 307) && internal {
@@ -225,7 +270,7 @@ pub fn run_checks(
         let Some(page) = by_url.get(target) else {
             continue;
         };
-        if is_internal(target) && is_error(page) && !sources.is_empty() {
+        if is_internal(target) && is_error(page, throttled) && !sources.is_empty() {
             let related: BTreeSet<String> = sources.iter().map(|s| s.from.clone()).collect();
             push(
                 FindingCode::BrokenInternalLink,
@@ -249,7 +294,7 @@ pub fn run_checks(
             {
                 push(FindingCode::OrphanPage, &page.url, vec![], None);
             }
-            if is_error(page) {
+            if is_error(page, throttled) {
                 push(FindingCode::SitemapUrlError, &page.url, vec![], None);
             } else if is_html_200(page) && !is_indexable(page) {
                 push(FindingCode::SitemapUrlNonIndexable, &page.url, vec![], None);
@@ -345,6 +390,7 @@ fn canonical_finding(
     canonical: Option<&str>,
     by_url: &BTreeMap<String, &PageRecord>,
     is_internal: &impl Fn(&str) -> bool,
+    throttled: bool,
 ) -> Option<(FindingCode, Vec<String>)> {
     let Some(canonical) = canonical else {
         return Some((FindingCode::CanonicalMissing, vec![]));
@@ -354,7 +400,7 @@ fn canonical_finding(
         return None;
     }
     let code = match by_url.get(&target) {
-        Some(t) if is_error(t) => FindingCode::CanonicalToError,
+        Some(t) if is_error(t, throttled) => FindingCode::CanonicalToError,
         Some(t) if (300..400).contains(&t.status) => FindingCode::CanonicalToRedirect,
         _ if !is_internal(&target) => FindingCode::CanonicalToOtherHost,
         _ => FindingCode::CanonicalToOtherUrl,
@@ -393,14 +439,12 @@ pub fn assemble(
     siteone: Option<SiteOneSummary>,
 ) -> CrawlResult {
     let links = analyze_links(&data.pages, &meta.start_url);
-    let mut findings = run_checks(
-        &data.pages,
-        &links,
-        &data.sitemap,
-        &meta.start_url,
-        data.start_content_encoding.as_deref(),
-        data.facts_version,
-    );
+    let mut findings = run_checks(&CheckInput {
+        start_content_encoding: data.start_content_encoding.as_deref(),
+        facts_version: data.facts_version,
+        throttled: meta.status == CrawlStatus::Throttled,
+        ..CheckInput::new(&data.pages, &links, &data.sitemap, &meta.start_url)
+    });
     if let Some(summary) = &siteone {
         findings.extend(site_findings(summary, &meta.start_url));
     }
@@ -418,7 +462,7 @@ pub fn assemble(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CollectedData, FACTS_VERSION, Image, JsonLd, Link, PageFacts};
+    use crate::model::{CollectedData, Image, JsonLd, Link, PageFacts};
 
     const BASE: &str = "https://x.fr";
     const START: &str = "https://x.fr/";
@@ -593,7 +637,7 @@ mod tests {
 
     fn check_from(pages: &[PageRecord], sm: &SitemapResult, start: &str) -> Vec<Finding> {
         let links = analyze_links(pages, start);
-        run_checks(pages, &links, sm, start, None, FACTS_VERSION)
+        run_checks(&CheckInput::new(pages, &links, sm, start))
     }
 
     fn check(pages: &[PageRecord], sm: &SitemapResult) -> Vec<Finding> {
@@ -993,14 +1037,8 @@ mod tests {
         ];
         let links = analyze_links(&pages, START);
         assert!(!links.inlinks.contains_key(&full("/orphan")));
-        let f = run_checks(
-            &pages,
-            &links,
-            &sitemap(&["/", "/orphan"]),
-            START,
-            None,
-            FACTS_VERSION,
-        );
+        let sm = sitemap(&["/", "/orphan"]);
+        let f = run_checks(&CheckInput::new(&pages, &links, &sm, START));
         assert_eq!(urls_of(&f, FindingCode::OrphanPage), vec![full("/orphan")]);
     }
 
@@ -1028,6 +1066,126 @@ mod tests {
             .meta(Some(&"m".repeat(100)))
             .lang(Some("fr"))
             .header("content-encoding", "br")
+    }
+
+    fn throttled_run(pages: &[PageRecord], sm: &SitemapResult, throttled: bool) -> Vec<Finding> {
+        let links = analyze_links(pages, START);
+        run_checks(&CheckInput {
+            throttled,
+            ..CheckInput::new(pages, &links, sm, START)
+        })
+    }
+
+    fn throttle_pages(status: i32) -> Vec<PageRecord> {
+        vec![
+            clean("/")
+                .links(&["/limite"])
+                .canonical(Some("/limite"))
+                .rec(),
+            other("/limite", status, "html"),
+        ]
+    }
+
+    const ERROR_CODES: [FindingCode; 4] = [
+        FindingCode::ServerError,
+        FindingCode::BrokenInternalLink,
+        FindingCode::SitemapUrlError,
+        FindingCode::CanonicalToError,
+    ];
+
+    #[test]
+    fn throttled_crawl_ignores_503_and_429() {
+        let sm = sitemap(&["/", "/limite"]);
+        for status in [503, 429] {
+            let f = throttled_run(&throttle_pages(status), &sm, true);
+            for code in ERROR_CODES {
+                assert!(of(&f, code.clone()).is_empty(), "{status} {code:?}");
+            }
+        }
+        let f = throttled_run(&throttle_pages(500), &sm, true);
+        for code in ERROR_CODES {
+            assert_eq!(of(&f, code.clone()).len(), 1, "500 {code:?}");
+        }
+        let f = throttled_run(&throttle_pages(503), &sm, false);
+        for code in ERROR_CODES {
+            assert_eq!(of(&f, code.clone()).len(), 1, "non limité 503 {code:?}");
+        }
+        let f = throttled_run(&throttle_pages(429), &sm, false);
+        for code in &ERROR_CODES[1..] {
+            assert_eq!(of(&f, code.clone()).len(), 1, "non limité 429 {code:?}");
+        }
+    }
+
+    fn noindex_codes() -> [FindingCode; 8] {
+        [
+            FindingCode::TitleMissing,
+            FindingCode::TitleTooLong,
+            FindingCode::TitleTooShort,
+            FindingCode::MetaDescriptionMissing,
+            FindingCode::MetaDescriptionTooLong,
+            FindingCode::MetaDescriptionTooShort,
+            FindingCode::H1Missing,
+            FindingCode::H1Multiple,
+        ]
+    }
+
+    #[test]
+    fn noindex_page_skips_title_meta_and_h1_checks() {
+        let bare = |p: P| {
+            p.title(None)
+                .meta(None)
+                .h1s(0)
+                .images_alt(&[("/i.png", None)])
+                .lang(None)
+        };
+        let f = check(&[bare(html("/a").robots("noindex")).rec()], &no_sitemap());
+        for code in noindex_codes() {
+            assert!(of(&f, code.clone()).is_empty(), "{code:?}");
+        }
+        assert_eq!(of(&f, FindingCode::Noindex).len(), 1);
+        assert_eq!(of(&f, FindingCode::ImageMissingAlt).len(), 1);
+        assert_eq!(of(&f, FindingCode::HtmlLangMissing).len(), 1);
+
+        let f = check(&[bare(html("/a")).rec()], &no_sitemap());
+        for code in [
+            FindingCode::TitleMissing,
+            FindingCode::MetaDescriptionMissing,
+            FindingCode::H1Missing,
+        ] {
+            assert_eq!(of(&f, code.clone()).len(), 1, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn noindex_page_skips_too_long_too_short_and_multiple_h1() {
+        let long = html("/long")
+            .robots("noindex")
+            .title(Some(&"t".repeat(80)))
+            .meta(Some(&"m".repeat(200)))
+            .h1s(2);
+        let short = html("/short")
+            .robots("noindex")
+            .title(Some("t"))
+            .meta(Some("m"));
+        let f = check(&[long.rec(), short.rec()], &no_sitemap());
+        for code in noindex_codes() {
+            assert!(of(&f, code.clone()).is_empty(), "{code:?}");
+        }
+    }
+
+    #[test]
+    fn noindex_by_x_robots_tag_also_skips() {
+        let page = html("/a")
+            .header("x-robots-tag", "noindex")
+            .title(None)
+            .meta(None)
+            .h1s(0)
+            .rec();
+        let f = check(&[page], &no_sitemap());
+        for code in noindex_codes() {
+            assert!(of(&f, code.clone()).is_empty(), "{code:?}");
+        }
+        assert_eq!(of(&f, FindingCode::Noindex).len(), 1);
     }
 
     fn only(pages: &[PageRecord], code: FindingCode) -> Vec<String> {
@@ -1218,7 +1376,11 @@ mod tests {
         let pages = vec![clean("/a").rec(), other("/gone", 404, "html")];
         let with = |enc: Option<&str>| {
             let links = analyze_links(&pages, START);
-            run_checks(&pages, &links, &no_sitemap(), START, enc, FACTS_VERSION)
+            let sm = no_sitemap();
+            run_checks(&CheckInput {
+                start_content_encoding: enc,
+                ..CheckInput::new(&pages, &links, &sm, START)
+            })
         };
 
         let f = with(Some("gzip"));
@@ -1247,9 +1409,13 @@ mod tests {
         let pages = vec![html("/").lang(None).rec()];
         let links = analyze_links(&pages, START);
         let run = |version: u32| {
-            run_checks(&pages, &links, &no_sitemap(), START, None, version)
-                .iter()
-                .any(|f| f.code == FindingCode::HtmlLangMissing)
+            let sm = no_sitemap();
+            run_checks(&CheckInput {
+                facts_version: version,
+                ..CheckInput::new(&pages, &links, &sm, START)
+            })
+            .iter()
+            .any(|f| f.code == FindingCode::HtmlLangMissing)
         };
         assert!(!run(0));
         assert!(!run(1));

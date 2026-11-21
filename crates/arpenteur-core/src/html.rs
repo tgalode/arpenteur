@@ -163,6 +163,14 @@ fn parse_json_ld(raw: &str) -> JsonLd {
     JsonLd { valid: true, types }
 }
 
+/// Titre placé dans un pied de page, un menu ou une colonne latérale.
+fn in_page_chrome(heading: scraper::ElementRef) -> bool {
+    heading
+        .ancestors()
+        .filter_map(scraper::ElementRef::wrap)
+        .any(|a| matches!(a.value().name(), "footer" | "nav" | "aside"))
+}
+
 /// Extrait les faits SEO d'une page HTML. Les URL sont résolues contre
 /// `<base href>` s'il existe, sinon contre `page_url`.
 pub fn extract_page(html: &str, page_url: &Url) -> PageFacts {
@@ -239,6 +247,7 @@ pub fn extract_page(html: &str, page_url: &Url) -> PageFacts {
 
     let headings = doc
         .select(&sel("h1, h2, h3, h4, h5, h6"))
+        .filter(|h| !in_page_chrome(*h))
         .filter_map(|h| h.value().name().strip_prefix('h')?.parse::<u8>().ok())
         .collect();
 
@@ -438,6 +447,25 @@ mod tests {
     fn extracts_heading_levels_in_order() {
         let f = facts("<body><h1>a</h1><h2>b</h2><h3>c</h3><h2>d</h2></body>");
         assert_eq!(f.headings, vec![1, 2, 3, 2]);
+    }
+
+    #[test]
+    fn headings_ignore_footer_nav_and_aside() {
+        let f = facts("<body><h1>A</h1><footer><h3>B</h3></footer></body>");
+        assert_eq!(f.headings, vec![1]);
+        let f = facts(
+            "<body><aside><div><h4>C</h4></div></aside><nav><h2>D</h2></nav><h1>A</h1></body>",
+        );
+        assert_eq!(f.headings, vec![1]);
+        let f = facts("<body><main><h1>A</h1><h3>B</h3></main></body>");
+        assert_eq!(f.headings, vec![1, 3]);
+    }
+
+    #[test]
+    fn h1_detection_is_unchanged_inside_nav() {
+        let f = facts("<body><nav><h1>Menu</h1></nav><h1>Titre</h1></body>");
+        assert_eq!(f.h1, vec!["Menu", "Titre"]);
+        assert_eq!(f.headings, vec![1]);
     }
 
     #[test]
