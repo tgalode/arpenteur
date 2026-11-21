@@ -14,6 +14,13 @@ pub struct CrawlSettings {
     pub include_regex: Vec<String>,
     pub ignore_regex: Vec<String>,
     pub limit_threshold: u32,
+    /// Demander une fois chaque lien externe après le crawl (vrai pour les réglages enregistrés avant).
+    #[serde(default = "default_true")]
+    pub check_external_links: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for CrawlSettings {
@@ -27,6 +34,7 @@ impl Default for CrawlSettings {
             include_regex: Vec::new(),
             ignore_regex: Vec::new(),
             limit_threshold: 5,
+            check_external_links: true,
         }
     }
 }
@@ -267,6 +275,31 @@ pub struct CollectedData {
     /// `None` : non observé ; `Some("")` : aucun `Content-Encoding` reçu.
     #[serde(default)]
     pub start_content_encoding: Option<String>,
+    /// Liens externes demandés après le crawl, un par adresse distincte.
+    #[serde(default)]
+    pub external_links: Vec<ExternalCheck>,
+    /// Adresses externes non demandées : limite de requêtes atteinte ou crawl interrompu.
+    #[serde(default)]
+    pub external_unchecked: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ExternalOutcome {
+    Ok,
+    Broken,
+    Unknown,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalCheck {
+    pub url: String,
+    pub outcome: ExternalOutcome,
+    /// Statut final ; `None` sans réponse.
+    pub status: Option<u16>,
+    /// Renseignée si elle diffère de `url`.
+    pub final_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

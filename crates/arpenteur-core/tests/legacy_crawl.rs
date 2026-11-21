@@ -93,3 +93,31 @@ fn crawl_without_probed_field_loads() {
         ]
     );
 }
+
+#[test]
+fn crawl_without_external_links_loads() {
+    let data: CollectedData = serde_json::from_str(PLAN_1_DATA).unwrap();
+    assert!(data.external_links.is_empty());
+    assert_eq!(data.external_unchecked, 0);
+    let result = assemble(meta(), data, None);
+    let codes: Vec<String> = result
+        .findings
+        .iter()
+        .map(|f| format!("{:?}", f.code))
+        .collect();
+    assert_eq!(
+        codes,
+        [
+            "BrokenInternalLink",
+            "SitemapNotFound",
+            "DuplicateContent",
+            "DuplicateContent",
+            "TitleTooShort",
+            "TitleTooShort",
+            "MetaDescriptionMissing",
+            "TitleDuplicate",
+            "TitleDuplicate",
+            "SecurityHeadersMissing",
+        ]
+    );
+}

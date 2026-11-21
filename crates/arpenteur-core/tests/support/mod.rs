@@ -32,6 +32,9 @@ pub enum Variant {
     CanonicalToTag,
     /// `/x` a un canonical vers `/canon-target`, qui répond 200 en `application/pdf`.
     CanonicalToPdf,
+    /// `/` lie `/p2` et dix routes `/ext-*` sur `localhost` (donc externes : le site écoute sur
+    /// `127.0.0.1`) ; `/p2` relie `/ext-404`.
+    ExternalLinks,
 }
 
 /// `Accept-Encoding` envoyé par la sonde de compression.
@@ -149,6 +152,51 @@ async fn handle(State(st): State<AppState>, headers: HeaderMap, uri: Uri) -> Res
             "br",
         )
             .into_response();
+    }
+    if st.variant == Variant::ExternalLinks {
+        let port = base.rsplit(':').next().unwrap_or_default().to_string();
+        let ext = |name: &str| format!(r#"<a href="http://localhost:{port}/{name}">{name}</a> "#);
+        return match path.as_str() {
+            "/robots.txt" => text("text/plain", "User-agent: *\nAllow: /\n".to_string()),
+            "/" => {
+                let links: String = [
+                    "ext-ok",
+                    "ext-404",
+                    "ext-410",
+                    "ext-403",
+                    "ext-429",
+                    "ext-999",
+                    "ext-500",
+                    "ext-redirect",
+                    "ext-loop",
+                    "ext-hang",
+                ]
+                .iter()
+                .map(|n| ext(n))
+                .collect();
+                html(format!(
+                    r#"<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Accueil</title></head><body><h1>Accueil</h1><a href="/p2">p2</a> {links}</body></html>"#
+                ))
+            }
+            "/p2" => html(format!(
+                r#"<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>P2</title></head><body><h1>P2</h1>{}</body></html>"#,
+                ext("ext-404")
+            )),
+            "/ext-ok" => html("<!doctype html><title>ok</title>".to_string()),
+            "/ext-404" => StatusCode::NOT_FOUND.into_response(),
+            "/ext-410" => StatusCode::GONE.into_response(),
+            "/ext-403" => StatusCode::FORBIDDEN.into_response(),
+            "/ext-429" => StatusCode::TOO_MANY_REQUESTS.into_response(),
+            "/ext-999" => StatusCode::from_u16(999).unwrap().into_response(),
+            "/ext-500" => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            "/ext-redirect" => redirect(StatusCode::FOUND, "/ext-404"),
+            "/ext-loop" => redirect(StatusCode::FOUND, "/ext-loop"),
+            "/ext-hang" => {
+                std::future::pending::<()>().await;
+                unreachable!()
+            }
+            _ => StatusCode::NOT_FOUND.into_response(),
+        };
     }
     if matches!(
         st.variant,

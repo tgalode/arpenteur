@@ -9,8 +9,13 @@ use arpenteur_core::canonical_probe::{
 };
 use arpenteur_core::collector::CrawlEvents;
 use arpenteur_core::engine::run_crawl;
+use arpenteur_core::external_links::{
+    MAX_REDIRECTS, check_external_links, classify_status, external_client_with_timeout,
+    external_targets,
+};
 use arpenteur_core::model::{
-    CrawlMeta, CrawlResult, CrawlSettings, CrawlStatus, FindingCode, Indexability, Progress, UrlRow,
+    CrawlMeta, CrawlResult, CrawlSettings, CrawlStatus, ExternalOutcome, FindingCode, Indexability,
+    Progress, UrlRow,
 };
 use arpenteur_core::settings::UrlFilter;
 use arpenteur_core::sitemap::{discover, discover_with_limit};
@@ -414,7 +419,7 @@ async fn post_probes(
         min_interval,
         cancel,
     };
-    run_post_crawl_probes(&env, pages, max_requests).await
+    run_post_crawl_probes(&env, pages, max_requests, None).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -864,4 +869,376 @@ async fn probed_rows_are_not_counted_in_meta_pages() {
     assert_eq!(probed, 1);
     assert_eq!(meta.pages as usize, data.pages.len() - probed);
     assert_eq!(m.pages, meta.pages);
+}
+
+// Liens externes
+
+fn page_linking(url: &str, hrefs: &[&str]) -> arpenteur_core::model::PageRecord {
+    let mut page = fixture_page(url, 200, None);
+    page.facts.as_mut().unwrap().links = hrefs
+        .iter()
+        .map(|h| arpenteur_core::model::Link {
+            href: h.to_string(),
+            anchor: String::new(),
+            nofollow: false,
+        })
+        .collect();
+    page
+}
+
+fn ext_client() -> reqwest::Client {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    external_client_with_timeout("Arpenteur-test", Duration::from_millis(500)).unwrap()
+}
+
+fn ext_url(site: &support::FixtureSite, path: &str) -> Url {
+    let port = site.base.rsplit(':').next().unwrap();
+    Url::parse(&format!("http://localhost:{port}{path}")).unwrap()
+}
+
+async fn check(
+    targets: &[Url],
+    budget: usize,
+    interval: Duration,
+    cancel: &CancellationToken,
+) -> (Vec<arpenteur_core::model::ExternalCheck>, usize) {
+    check_external_links(&ext_client(), targets, budget, interval, cancel).await
+}
+
+fn outcome_of(
+    checks: &[arpenteur_core::model::ExternalCheck],
+    url: &Url,
+) -> arpenteur_core::model::ExternalCheck {
+    checks
+        .iter()
+        .find(|c| c.url == url.as_str())
+        .unwrap_or_else(|| panic!("pas de vérification pour {url}"))
+        .clone()
+}
+
+#[test]
+fn classify_status_boundaries() {
+    for s in [200, 301, 399] {
+        assert_eq!(classify_status(s), ExternalOutcome::Ok, "{s}");
+    }
+    for s in [404, 410] {
+        assert_eq!(classify_status(s), ExternalOutcome::Broken, "{s}");
+    }
+    for s in [400, 401, 403, 429, 500, 503, 999] {
+        assert_eq!(classify_status(s), ExternalOutcome::Unknown, "{s}");
+    }
+    assert_eq!(MAX_REDIRECTS, 5);
+}
+
+#[test]
+fn external_targets_are_distinct_http_links_off_site() {
+    let start = Url::parse("https://exemple.fr/").unwrap();
+    let pages = vec![
+        page_linking(
+            "https://exemple.fr/",
+            &[
+                "https://autre.fr/a#haut",
+                "https://autre.fr/a",
+                "mailto:contact@exemple.fr",
+                "tel:+33123456789",
+                "https://exemple.fr/interne",
+                "https://www.exemple.fr/www",
+                "http://tiers.fr/b",
+                "ftp://tiers.fr/c",
+            ],
+        ),
+        page_linking(
+            "https://exemple.fr/p2",
+            &["https://autre.fr/a", "https://z.fr/"],
+        ),
+        // Une page d'un autre site ne contribue pas : constats sur les pages internes seulement.
+        page_linking("https://etranger.fr/", &["https://jamais.fr/"]),
+    ];
+    let targets: Vec<String> = external_targets(&pages, &start)
+        .iter()
+        .map(Url::to_string)
+        .collect();
+    assert_eq!(
+        targets,
+        ["https://autre.fr/a", "http://tiers.fr/b", "https://z.fr/"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn broken_only_on_404_410() {
+    let site = start_fixture_site(Variant::ExternalLinks).await;
+    let u = |p: &str| ext_url(&site, p);
+    let all = [
+        "/ext-ok",
+        "/ext-404",
+        "/ext-410",
+        "/ext-403",
+        "/ext-429",
+        "/ext-999",
+        "/ext-500",
+        "/ext-redirect",
+        "/ext-loop",
+        "/ext-hang",
+    ]
+    .map(&u);
+    let (checks, used) = check(&all, 100, Duration::ZERO, &CancellationToken::new()).await;
+    assert_eq!(checks.len(), all.len());
+    assert_eq!(used, all.len());
+
+    let ok = outcome_of(&checks, &u("/ext-ok"));
+    assert_eq!(
+        (ok.outcome, ok.status, ok.final_url),
+        (ExternalOutcome::Ok, Some(200), None)
+    );
+    for (path, status) in [("/ext-404", 404), ("/ext-410", 410)] {
+        let c = outcome_of(&checks, &u(path));
+        assert_eq!(
+            (c.outcome, c.status),
+            (ExternalOutcome::Broken, Some(status)),
+            "{path}"
+        );
+    }
+    let redirected = outcome_of(&checks, &u("/ext-redirect"));
+    assert_eq!(redirected.outcome, ExternalOutcome::Broken);
+    assert_eq!(redirected.status, Some(404));
+    assert_eq!(redirected.final_url, Some(u("/ext-404").to_string()));
+
+    for (path, status) in [
+        ("/ext-403", Some(403)),
+        ("/ext-429", Some(429)),
+        ("/ext-999", Some(999)),
+        ("/ext-500", Some(500)),
+        ("/ext-loop", None),
+        ("/ext-hang", None),
+    ] {
+        let c = outcome_of(&checks, &u(path));
+        assert_eq!(
+            (c.outcome, c.status),
+            (ExternalOutcome::Unknown, status),
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_external_url_is_requested_once() {
+    let site = start_fixture_site(Variant::ExternalLinks).await;
+    let start = Url::parse("https://exemple.fr/").unwrap();
+    let link = |p: &str| ext_url(&site, p).to_string();
+    let pages: Vec<_> = (0..50)
+        .map(|i| {
+            page_linking(
+                &format!("https://exemple.fr/p{i}"),
+                &[&link("/ext-404"), &link("/ext-ok")],
+            )
+        })
+        .collect();
+    let targets = external_targets(&pages, &start);
+    assert_eq!(targets.len(), 2);
+    let (checks, used) = check(&targets, 100, Duration::ZERO, &CancellationToken::new()).await;
+    assert_eq!((checks.len(), used), (2, 2));
+    assert_eq!(site.count("/ext-404"), 1);
+    assert_eq!(site.count("/ext-ok"), 1);
+    assert_eq!(site.count("/robots.txt"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unknown_domain_is_broken_after_a_second_try() {
+    let url = Url::parse("https://domaine-inexistant.invalid/").unwrap();
+    let (checks, used) = check(
+        std::slice::from_ref(&url),
+        10,
+        Duration::ZERO,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(used, 2);
+    let c = outcome_of(&checks, &url);
+    assert_eq!(
+        (c.outcome, c.status, c.final_url),
+        (ExternalOutcome::Broken, None, None)
+    );
+
+    // Le budget ne paie pas le second essai : jamais « cassé » sur une seule résolution ratée.
+    let (checks, used) = check(
+        std::slice::from_ref(&url),
+        1,
+        Duration::ZERO,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(used, 1);
+    assert_eq!(outcome_of(&checks, &url).outcome, ExternalOutcome::Unknown);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refused_connection_is_unknown() {
+    let closed = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let url = Url::parse(&format!("http://localhost:{closed}/")).unwrap();
+    let (checks, used) = check(
+        std::slice::from_ref(&url),
+        10,
+        Duration::ZERO,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(used, 1);
+    let c = outcome_of(&checks, &url);
+    assert_eq!((c.outcome, c.status), (ExternalOutcome::Unknown, None));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn external_checks_share_the_budget() {
+    let site = start_fixture_site(Variant::ExternalLinks).await;
+    let targets: Vec<Url> = ["/ext-ok", "/ext-404", "/ext-410", "/ext-403", "/ext-429"]
+        .iter()
+        .map(|p| ext_url(&site, p))
+        .collect();
+    let (checks, used) = check(&targets, 3, Duration::ZERO, &CancellationToken::new()).await;
+    assert_eq!((checks.len(), used), (3, 3));
+    assert_eq!(targets.len() - checks.len(), 2);
+    assert_eq!(site.requests.lock().unwrap().len(), 3);
+
+    let before = site.requests.lock().unwrap().len();
+    let (checks, used) = check(&targets, 0, Duration::ZERO, &CancellationToken::new()).await;
+    assert!(checks.is_empty());
+    assert_eq!(used, 0);
+    assert_eq!(site.requests.lock().unwrap().len(), before);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_stops_external_checks() {
+    let site = start_fixture_site(Variant::ExternalLinks).await;
+    let targets: Vec<Url> = ["/ext-ok", "/ext-404", "/ext-410"]
+        .iter()
+        .map(|p| ext_url(&site, p))
+        .collect();
+
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    let began = Instant::now();
+    let (checks, used) = check(&targets, 10, Duration::from_secs(30), &cancelled).await;
+    assert!(began.elapsed() < Duration::from_secs(5));
+    assert!((checks.len(), used) == (0, 0));
+    assert_eq!(site.requests.lock().unwrap().len(), 0);
+
+    // Annulé pendant l'attente du débit : la première vérification est gardée.
+    let cancel = CancellationToken::new();
+    let canceller = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        canceller.cancel();
+    });
+    let began = Instant::now();
+    let (checks, used) = check(&targets, 10, Duration::from_millis(400), &cancel).await;
+    assert!(began.elapsed() < Duration::from_secs(5));
+    assert_eq!((checks.len(), used), (1, 1));
+    assert_eq!(checks[0].outcome, ExternalOutcome::Ok);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn external_checks_wait_min_interval() {
+    let site = start_fixture_site(Variant::ExternalLinks).await;
+    let targets: Vec<Url> = ["/ext-ok", "/ext-404"]
+        .iter()
+        .map(|p| ext_url(&site, p))
+        .collect();
+    let began = Instant::now();
+    let (checks, _) = check(
+        &targets,
+        10,
+        Duration::from_millis(300),
+        &CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(checks.len(), 2);
+    assert!(began.elapsed() >= Duration::from_millis(600));
+}
+
+async fn crawl_external(settings: CrawlSettings, stop_early: bool) -> CrawlRun {
+    run_with(Variant::ExternalLinks, settings, |cancel| {
+        if stop_early {
+            Arc::new(CancelOnFirstProgress(cancel.clone()))
+        } else {
+            Arc::new(NoEvents)
+        }
+    })
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn completed_crawl_checks_external_links_once_each() {
+    let (site, store, loc, meta, _root) = crawl_external(fast_settings(), false).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(data.external_links.len(), 10);
+    assert_eq!(data.external_unchecked, 0);
+    assert_eq!(site.count("/ext-ok"), 1);
+    // /ext-404 est lié sur deux pages et atteint aussi par /ext-redirect : 2 requêtes, pas 3.
+    assert_eq!(site.count("/ext-404"), 2);
+    assert!(
+        data.pages
+            .iter()
+            .all(|p| !path_of(&p.url).starts_with("/ext-"))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn crawl_budget_leaves_links_unchecked() {
+    // 2 pages crawlées + 1 compression + 0 canonical : 4 requêtes restent pour 10 liens.
+    let settings = CrawlSettings {
+        max_requests: 7,
+        ..fast_settings()
+    };
+    let (site, store, loc, _meta, _root) = crawl_external(settings, false).await;
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(data.external_links.len(), 4);
+    assert_eq!(data.external_unchecked, 6);
+    assert_eq!(site.count("/ext-hang"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn setting_off_makes_no_external_request() {
+    let settings = CrawlSettings {
+        check_external_links: false,
+        ..fast_settings()
+    };
+    let (site, store, loc, meta, _root) = crawl_external(settings, false).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert!(data.external_links.is_empty());
+    assert_eq!(data.external_unchecked, 0);
+    assert!(
+        !site
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.starts_with("/ext-"))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stopped_crawl_checks_no_external_link() {
+    let settings = CrawlSettings {
+        workers: 1,
+        ..fast_settings()
+    };
+    let (site, store, loc, meta, _root) = crawl_external(settings, true).await;
+    assert_eq!(meta.status, CrawlStatus::Stopped);
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert!(data.external_links.is_empty());
+    assert_eq!(data.external_unchecked, 0);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !site
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.starts_with("/ext-"))
+    );
 }

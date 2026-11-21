@@ -75,6 +75,7 @@ use url::Url;
 
 use crate::canonical_probe::{ProbeEnv, probe_client, run_post_crawl_probes};
 use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
+use crate::external_links::external_client;
 use crate::model::{
     CollectedData, CrawlLocation, CrawlMeta, CrawlSettings, CrawlStatus, FACTS_VERSION,
     SitemapResult,
@@ -224,6 +225,7 @@ pub async fn run_crawl(
 
     let mut pages = handle.map(|h| h.pages()).unwrap_or_default();
     let mut start_content_encoding = None;
+    let (mut external_links, mut external_unchecked) = (Vec::new(), 0);
     if status == CrawlStatus::Completed {
         // Après un crawl terminé seulement, au même débit et dans la même limite.
         if let Ok((min_interval, _)) = sitemap_budget(&settings) {
@@ -236,9 +238,20 @@ pub async fn run_crawl(
                     min_interval,
                     cancel: &cancel,
                 };
-                let probed =
-                    run_post_crawl_probes(&env, &pages, settings.max_requests as usize).await;
+                let external = settings
+                    .check_external_links
+                    .then(|| external_client(&plain_user_agent(&settings)).ok())
+                    .flatten();
+                let probed = run_post_crawl_probes(
+                    &env,
+                    &pages,
+                    settings.max_requests as usize,
+                    external.as_ref(),
+                )
+                .await;
                 start_content_encoding = probed.content_encoding;
+                external_links = probed.external;
+                external_unchecked = probed.external_unchecked;
                 pages.extend(probed.pages);
             }
         }
@@ -254,6 +267,8 @@ pub async fn run_crawl(
             sitemap,
             facts_version: FACTS_VERSION,
             start_content_encoding,
+            external_links,
+            external_unchecked,
         },
     ) {
         meta.status = write_failure(e);

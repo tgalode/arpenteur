@@ -3,6 +3,7 @@ pub mod checks;
 pub mod collector;
 pub mod defaults;
 pub mod engine;
+pub mod external_links;
 pub mod html;
 pub mod limit_guard;
 pub mod links;

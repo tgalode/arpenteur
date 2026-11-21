@@ -152,4 +152,18 @@ mod tests {
         store.write_default_settings(&saved).unwrap();
         assert!(!tmp.path().join("settings.json.tmp").exists());
     }
+
+    #[test]
+    fn settings_without_check_external_links_default_to_true() {
+        let old: CrawlSettings = serde_json::from_str(r#"{"workers": 3}"#).unwrap();
+        assert!(old.check_external_links);
+        let off: CrawlSettings = serde_json::from_str(r#"{"checkExternalLinks": false}"#).unwrap();
+        assert!(!off.check_external_links);
+        assert!(CrawlSettings::default().check_external_links);
+
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("settings.json"), r#"{"workers": 3}"#).unwrap();
+        let store = CrawlStore::new(tmp.path().to_path_buf());
+        assert!(store.read_default_settings().check_external_links);
+    }
 }

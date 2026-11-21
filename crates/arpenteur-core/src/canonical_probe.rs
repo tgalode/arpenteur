@@ -9,7 +9,8 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::checks::reference_page;
-use crate::model::PageRecord;
+use crate::external_links::{check_external_links, external_targets};
+use crate::model::{ExternalCheck, PageRecord};
 use crate::settings::UrlFilter;
 use crate::urls::{is_same_site, normalize_url};
 
@@ -28,6 +29,9 @@ pub struct ProbeEnv<'a> {
 pub struct PostCrawl {
     pub content_encoding: Option<String>,
     pub pages: Vec<PageRecord>,
+    pub external: Vec<ExternalCheck>,
+    /// Adresses externes non demandées : budget épuisé ou annulation.
+    pub external_unchecked: u32,
 }
 
 /// Client des sondes : ni redirection suivie, ni décompression automatique
@@ -187,12 +191,14 @@ pub async fn probe_canonical_targets(
     (added, requests)
 }
 
-/// Compression d'abord (un constat de site), puis cibles de canonical, dans le
-/// budget restant `max_requests - pages crawlées`.
+/// Compression d'abord (un constat de site), puis cibles de canonical, puis liens
+/// externes (`external_client` à `None` : réglage décoché), dans le budget restant
+/// `max_requests - pages crawlées`.
 pub async fn run_post_crawl_probes(
     env: &ProbeEnv<'_>,
     pages: &[PageRecord],
     max_requests: usize,
+    external_client: Option<&reqwest::Client>,
 ) -> PostCrawl {
     let mut budget = max_requests.saturating_sub(pages.len());
     let mut content_encoding = None;
@@ -208,9 +214,20 @@ pub async fn run_post_crawl_probes(
             }
         }
     }
-    let (pages, _) = probe_canonical_targets(env, pages, budget).await;
+    let (probed, made) = probe_canonical_targets(env, pages, budget).await;
+    budget = budget.saturating_sub(made);
+
+    let (mut external, mut external_unchecked) = (Vec::new(), 0);
+    if let Some(client) = external_client {
+        let targets = external_targets(pages, env.start);
+        (external, _) =
+            check_external_links(client, &targets, budget, env.min_interval, env.cancel).await;
+        external_unchecked = (targets.len() - external.len()) as u32;
+    }
     PostCrawl {
         content_encoding,
-        pages,
+        pages: probed,
+        external,
+        external_unchecked,
     }
 }
