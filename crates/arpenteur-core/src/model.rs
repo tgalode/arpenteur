@@ -218,7 +218,9 @@ pub struct UrlRow {
     pub status: i32,
     pub content_type: String,
     pub title: Option<String>,
+    pub title_length: Option<u32>,
     pub meta_description: Option<String>,
+    pub meta_description_length: Option<u32>,
     pub h1: Option<String>,
     pub h1_count: u32,
     pub canonical: Option<String>,
@@ -227,6 +229,7 @@ pub struct UrlRow {
     pub inlinks: u32,
     pub word_count: Option<u32>,
     pub size: Option<i64>,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

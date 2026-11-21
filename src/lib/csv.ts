@@ -1,7 +1,8 @@
 import { t } from "../i18n/fr";
 import { CATALOG, findingTitle, LEVELS } from "./catalog";
 import codes from "./finding-codes.json";
-import { indexableText, statusText } from "./table";
+import { ALL_COLUMN_KEYS } from "./columns";
+import { urlColumn } from "./urlColumns";
 import type { Finding, UrlRow } from "./types";
 
 // Excel en français : séparateur « ; », UTF-8 avec BOM, fins de ligne CRLF.
@@ -27,29 +28,10 @@ function toCsv(header: string[], lines: Array<Array<string | number | null | und
 }
 
 export function urlsCsv(rows: UrlRow[]): string {
+  const columns = ALL_COLUMN_KEYS.map(urlColumn);
   return toCsv(
-    [
-      t("col_url"),
-      t("col_status"),
-      t("col_type"),
-      t("col_title"),
-      t("col_h1"),
-      t("col_indexable"),
-      t("col_depth"),
-      t("col_inlinks"),
-      t("col_words"),
-    ],
-    rows.map((r) => [
-      r.url,
-      statusText(r.status),
-      r.contentType,
-      r.title,
-      r.h1,
-      indexableText(r.indexable),
-      r.depth,
-      r.inlinks,
-      r.wordCount,
-    ]),
+    columns.map((c) => c.csvLabel),
+    rows.map((r) => columns.map((c) => c.csv(r))),
   );
 }
 

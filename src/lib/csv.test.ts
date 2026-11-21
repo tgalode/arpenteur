@@ -9,7 +9,9 @@ function row(over: Partial<UrlRow> = {}): UrlRow {
     status: 200,
     contentType: "text/html",
     title: "Accueil",
+    titleLength: null,
     metaDescription: null,
+    metaDescriptionLength: null,
     h1: "Bienvenue",
     h1Count: 1,
     canonical: null,
@@ -18,6 +20,7 @@ function row(over: Partial<UrlRow> = {}): UrlRow {
     inlinks: 3,
     wordCount: 120,
     size: null,
+    elapsedMs: 0,
     ...over,
   };
 }
@@ -26,12 +29,29 @@ function finding(over: Partial<Finding> = {}): Finding {
   return { code: "titleMissing", url: "https://exemple.fr/a", related: [], detail: null, ...over };
 }
 
-test("séparateur point-virgule, BOM et CRLF", () => {
-  const csv = urlsCsv([row(), row({ url: "https://exemple.fr/b" })]);
+const HEADER =
+  "url;statut;type;title;longueur du title;meta description;longueur de la meta description;h1;nombre de h1;canonical;indexable;profondeur;liens entrants;mots;poids (octets);temps de réponse (ms)";
+
+test("le CSV des URL a 16 colonnes dans l’ordre de la conception", () => {
+  const csv = urlsCsv([
+    row({
+      title: "Accueil",
+      titleLength: 7,
+      metaDescription: "Artisan",
+      metaDescriptionLength: 7,
+      canonical: "https://exemple.fr/",
+      size: 86016,
+      elapsedMs: 212,
+    }),
+    row({ url: "https://exemple.fr/b" }),
+  ]);
   expect(csv.startsWith("﻿")).toBe(true);
   const lines = csv.slice(1).split("\r\n");
-  expect(lines[0]).toBe("url;statut;type;title;h1;indexable;prof.;liens entr.;mots");
-  expect(lines[1]).toBe("https://exemple.fr/;200;text/html;Accueil;Bienvenue;oui;0;3;120");
+  expect(lines[0]).toBe(HEADER);
+  expect(lines[0].split(";")).toHaveLength(16);
+  expect(lines[1]).toBe(
+    "https://exemple.fr/;200;text/html;Accueil;7;Artisan;7;Bienvenue;1;https://exemple.fr/;oui;0;3;120;86016;212",
+  );
   expect(lines).toHaveLength(3);
   expect(csv.replace(/\r\n/g, "")).not.toMatch(/[\r\n]/);
 });
@@ -43,7 +63,7 @@ test("le CSV écrit oui, non ou non analysé", () => {
     row({ indexable: "notAnalyzed" }),
   ]);
   const lines = csv.slice(1).split("\r\n");
-  expect(lines.slice(1, 4).map((l) => l.split(";")[5])).toEqual(["oui", "non", "non analysé"]);
+  expect(lines.slice(1, 4).map((l) => l.split(";")[10])).toEqual(["oui", "non", "non analysé"]);
 });
 
 test("les champs avec ; \" ou retour à la ligne sont échappés", () => {
@@ -52,9 +72,14 @@ test("les champs avec ; \" ou retour à la ligne sont échappés", () => {
   expect(csv).toContain('"ligne1\nligne2"');
 });
 
-test("les valeurs absentes donnent des cellules vides", () => {
-  const csv = urlsCsv([row({ title: null, contentType: "", depth: null })]);
-  expect(csv.slice(1).split("\r\n")[1]).toBe("https://exemple.fr/;200;;;Bienvenue;oui;;3;120");
+test("une valeur absente donne une cellule vide", () => {
+  const csv = urlsCsv([row({ title: null, contentType: "", depth: null, size: null, wordCount: null })]);
+  expect(csv.slice(1).split("\r\n")[1]).toBe("https://exemple.fr/;200;;;;;;Bienvenue;1;;oui;;3;;;0");
+});
+
+test("le CSV écrit des nombres bruts, pas des valeurs mises en forme", () => {
+  const cells = urlsCsv([row({ size: 1500, elapsedMs: 7 })]).slice(1).split("\r\n")[1].split(";");
+  expect(cells.slice(14)).toEqual(["1500", "7"]);
 });
 
 test("problemsCsv donne le niveau et le titre du catalogue", () => {

@@ -24,6 +24,11 @@ fn collapsed(text: Option<&str>) -> Option<String> {
     (!joined.is_empty()).then_some(joined)
 }
 
+/// Longueur en caractères après réduction des espaces, comme les contrôles de title et de meta description.
+fn char_count(text: Option<&str>) -> Option<u32> {
+    collapsed(text).map(|t| t.chars().count() as u32)
+}
+
 fn has_brotli(content_encoding: &str) -> bool {
     content_encoding
         .split(',')
@@ -478,12 +483,16 @@ pub fn build_rows(pages: &[PageRecord], links: &LinkReport) -> Vec<UrlRow> {
         .map(|p| {
             let key = norm(&p.url);
             let facts = p.facts.as_ref();
+            let title = facts.and_then(|f| f.title.clone());
+            let meta_description = facts.and_then(|f| f.meta_description.clone());
             UrlRow {
                 url: p.url.clone(),
                 status: p.status,
                 content_type: p.content_type.clone(),
-                title: facts.and_then(|f| f.title.clone()),
-                meta_description: facts.and_then(|f| f.meta_description.clone()),
+                title_length: char_count(title.as_deref()),
+                title,
+                meta_description_length: char_count(meta_description.as_deref()),
+                meta_description,
                 h1: facts.and_then(|f| f.h1.first().cloned()),
                 h1_count: facts.map_or(0, |f| f.h1.len() as u32),
                 canonical: facts.and_then(|f| f.canonical.clone()),
@@ -492,6 +501,7 @@ pub fn build_rows(pages: &[PageRecord], links: &LinkReport) -> Vec<UrlRow> {
                 inlinks: links.inlinks.get(&key).map_or(0, |v| v.len() as u32),
                 word_count: facts.map(|f| f.word_count),
                 size: p.size,
+                elapsed_ms: p.elapsed_ms,
             }
         })
         .collect()
@@ -1084,6 +1094,23 @@ mod tests {
         assert_eq!(rows[2].word_count, None);
         assert_eq!(rows[2].depth, None);
         assert_eq!(rows[2].indexable, Indexability::No);
+    }
+
+    #[test]
+    fn row_lengths_are_counted_after_whitespace_collapse() {
+        let pages = vec![
+            html("/a").title(Some("a   b")).meta(Some(" x \n y  z ")).rec(),
+            html("/b").title(None).meta(None).rec(),
+            html("/c").title(Some("   ")).rec(),
+        ];
+        let links = analyze_links(&pages, START);
+        let rows = build_rows(&pages, &links);
+        assert_eq!(rows[0].title_length, Some(3));
+        assert_eq!(rows[0].meta_description_length, Some(5));
+        assert_eq!(rows[1].title_length, None);
+        assert_eq!(rows[1].meta_description_length, None);
+        assert_eq!(rows[2].title_length, None);
+        assert_eq!(rows[0].elapsed_ms, pages[0].elapsed_ms);
     }
 
     #[test]

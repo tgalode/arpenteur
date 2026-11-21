@@ -1,71 +1,13 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMemo, useRef, useState } from "react";
 import { t } from "../i18n/fr";
-import { filterRows, httpTone, indexableText, indexableTone, sortRows, statusText, type StatusClass } from "../lib/table";
+import { loadColumnKeys, saveColumnKeys, type ColumnKey } from "../lib/columns";
+import { filterRows, sortRows, type StatusClass } from "../lib/table";
+import { urlColumn } from "../lib/urlColumns";
 import { normalizeUrl } from "../lib/urls";
+import { ColumnPicker } from "./ColumnPicker";
 import type { UrlRow } from "../lib/types";
 
-type Column = {
-  key: keyof UrlRow;
-  label: string;
-  width: string;
-  render: (r: UrlRow) => string;
-  tone?: (r: UrlRow) => string;
-  numeric?: boolean;
-  tip?: boolean;
-};
-
-const text = (v: string | number | null | undefined): string =>
-  v === null || v === undefined || v === "" ? t("none") : String(v);
-
-const isEmpty = (v: string | number | null | undefined): boolean => v === null || v === undefined || v === "";
-
-const COLUMNS: Column[] = [
-  { key: "url", label: t("col_url"), width: "3fr", render: (r) => r.url, tip: true },
-  {
-    key: "status",
-    label: t("col_status"),
-    width: "calc(20ch + 18px)",
-    render: (r) => statusText(r.status),
-    tip: true,
-    tone: (r) => `tone-${httpTone(r.status)}`,
-  },
-  {
-    key: "contentType",
-    label: t("col_type"),
-    width: "1fr",
-    render: (r) => text(r.contentType),
-    tone: () => "dim",
-  },
-  {
-    key: "title",
-    label: t("col_title"),
-    width: "2fr",
-    render: (r) => text(r.title),
-    tone: (r) => (isEmpty(r.title) ? "dim" : ""),
-    tip: true,
-  },
-  {
-    key: "h1",
-    label: t("col_h1"),
-    width: "2fr",
-    render: (r) => text(r.h1),
-    tone: (r) => (isEmpty(r.h1) ? "dim" : ""),
-    tip: true,
-  },
-  {
-    key: "indexable",
-    label: t("col_indexable"),
-    width: "calc(12ch + 18px)",
-    render: (r) => indexableText(r.indexable),
-    tone: (r) => indexableTone(r.indexable),
-  },
-  { key: "depth", label: t("col_depth"), width: "calc(9ch + 18px)", render: (r) => text(r.depth), numeric: true, tone: (r) => (isEmpty(r.depth) ? "dim" : "") },
-  { key: "inlinks", label: t("col_inlinks"), width: "calc(14ch + 18px)", render: (r) => text(r.inlinks), numeric: true, tone: (r) => (isEmpty(r.inlinks) ? "dim" : "") },
-  { key: "wordCount", label: t("col_words"), width: "calc(8ch + 18px)", render: (r) => text(r.wordCount), numeric: true, tone: (r) => (isEmpty(r.wordCount) ? "dim" : "") },
-];
-
-const GRID = COLUMNS.map((c) => c.width).join(" ");
 const ROW_HEIGHT = 26;
 const STATUS_CLASSES: StatusClass[] = ["all", "2xx", "3xx", "4xx", "5xx", "error"];
 
@@ -89,7 +31,16 @@ export function UrlTable({
   const [query, setQuery] = useState("");
   const [statusClass, setStatusClass] = useState<StatusClass>("all");
   const [sort, setSort] = useState<{ key: keyof UrlRow; dir: "asc" | "desc" } | null>(null);
+  const [columnKeys, setColumnKeys] = useState<ColumnKey[]>(loadColumnKeys);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const columns = useMemo(() => columnKeys.map(urlColumn), [columnKeys]);
+  const grid = useMemo(() => columns.map((c) => c.width).join(" "), [columns]);
+
+  function chooseColumns(keys: ColumnKey[]) {
+    setColumnKeys(keys);
+    saveColumnKeys(keys);
+    setSort((s) => (s && !keys.includes(s.key as ColumnKey) ? null : s));
+  }
 
   const visible = useMemo(() => {
     const scoped = urlFilter ? rows.filter((r) => urlFilter.has(normalizeUrl(r.url))) : rows;
@@ -132,11 +83,12 @@ export function UrlTable({
             </option>
           ))}
         </select>
+        <ColumnPicker selected={columnKeys} onChange={chooseColumns} />
       </div>
       <div role="table" aria-rowcount={visible.length + 1} className="urltable-table">
         <div ref={scrollRef} className="urltable-scroll">
-          <div role="row" className="urltable-head" style={{ gridTemplateColumns: GRID }}>
-            {COLUMNS.map((c) => {
+          <div role="row" className="urltable-head" style={{ gridTemplateColumns: grid }}>
+            {columns.map((c) => {
               const active = sort?.key === c.key;
               return (
                 <div
@@ -182,10 +134,10 @@ export function UrlTable({
                     right: 0,
                     height: v.size,
                     transform: `translateY(${v.start}px)`,
-                    gridTemplateColumns: GRID,
+                    gridTemplateColumns: grid,
                   }}
                 >
-                  {COLUMNS.map((c) => {
+                  {columns.map((c) => {
                     const value = c.render(r);
                     const tone = c.tone?.(r) ?? "";
                     const cls = [c.numeric ? "n" : "", tone.startsWith("tone-") ? tone : tone ? "dim" : ""]

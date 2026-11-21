@@ -21,6 +21,16 @@ export function statusText(status: number): string {
   }
 }
 
+/** Poids en Ko, arrondi à l’entier le plus proche, jamais 0 Ko pour une page non vide. */
+export function formatSizeKo(bytes: number): string {
+  const ko = bytes > 0 ? Math.max(1, Math.round(bytes / 1024)) : 0;
+  return `${ko} Ko`;
+}
+
+export function formatMs(ms: number): string {
+  return `${ms} ms`;
+}
+
 export function indexableText(i: Indexability): string {
   if (i === "yes") return t("yes");
   return i === "no" ? t("no") : t("notAnalyzed");

@@ -1,15 +1,18 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import type { Indexability, UrlRow } from "../lib/types";
 import { UrlTable } from "./UrlTable";
 
-function row(url: string, indexable: Indexability): UrlRow {
+function row(url: string, indexable: Indexability, over: Partial<UrlRow> = {}): UrlRow {
   return {
     url,
     status: 200,
     contentType: "html",
     title: null,
+    titleLength: null,
     metaDescription: null,
+    metaDescriptionLength: null,
     h1: null,
     h1Count: 0,
     canonical: null,
@@ -18,6 +21,8 @@ function row(url: string, indexable: Indexability): UrlRow {
     inlinks: 0,
     wordCount: null,
     size: null,
+    elapsedMs: 0,
+    ...over,
   };
 }
 
@@ -40,6 +45,7 @@ afterAll(() => {
   }
 });
 
+beforeEach(() => localStorage.clear());
 afterEach(cleanup);
 
 test("indexable affiche oui, non ou non analysé", () => {
@@ -58,4 +64,78 @@ test("indexable affiche oui, non ou non analysé", () => {
   const cells = screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[5]);
   expect(cells.map((c) => c.textContent)).toEqual(["oui", "non", "non analysé"]);
   expect(cells.map((c) => c.className)).toEqual(["tone-ok", "tone-err", "dim"]);
+});
+
+function renderTable(rows: UrlRow[]) {
+  return render(<UrlTable rows={rows} selectedUrl={null} urlFilter={null} onSelect={() => {}} />);
+}
+
+const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent);
+
+test("le tableau montre les 9 colonnes par défaut", () => {
+  renderTable([row("https://exemple.fr/a", "yes")]);
+  expect(headers()).toEqual(["url", "statut", "type", "title", "h1", "indexable", "prof.", "liens entr.", "mots"]);
+});
+
+test("cocher une colonne l’affiche et le choix est retenu", async () => {
+  const user = userEvent.setup();
+  const first = renderTable([row("https://exemple.fr/a", "yes", { size: 86016, elapsedMs: 212 })]);
+  await user.click(screen.getByRole("button", { name: "colonnes" }));
+  await user.click(screen.getByRole("checkbox", { name: "poids" }));
+  expect(headers()).toContain("poids");
+  expect(headers()[headers().length - 1]).toBe("poids");
+  first.unmount();
+  renderTable([row("https://exemple.fr/a", "yes")]);
+  expect(headers()).toContain("poids");
+});
+
+test("décocher une colonne la masque", async () => {
+  const user = userEvent.setup();
+  renderTable([row("https://exemple.fr/a", "yes")]);
+  await user.click(screen.getByRole("button", { name: "colonnes" }));
+  await user.click(screen.getByRole("checkbox", { name: "h1" }));
+  expect(headers()).not.toContain("h1");
+  expect(headers()).toHaveLength(8);
+});
+
+test("la colonne url ne peut pas être masquée", async () => {
+  const user = userEvent.setup();
+  renderTable([row("https://exemple.fr/a", "yes")]);
+  await user.click(screen.getByRole("button", { name: "colonnes" }));
+  await user.click(screen.getByRole("checkbox", { name: "url" }));
+  expect(headers()[0]).toBe("url");
+});
+
+test("un choix enregistré invalide revient aux colonnes par défaut", () => {
+  localStorage.setItem("arpenteur.columns", "{pas du json");
+  renderTable([row("https://exemple.fr/a", "yes")]);
+  expect(headers()).toHaveLength(9);
+  expect(headers()[0]).toBe("url");
+});
+
+test("poids et temps sont lisibles dans le tableau", async () => {
+  const user = userEvent.setup();
+  renderTable([
+    row("https://exemple.fr/a", "yes", { size: 86016, elapsedMs: 212 }),
+    row("https://exemple.fr/b", "yes", { size: null, elapsedMs: 5 }),
+  ]);
+  await user.click(screen.getByRole("button", { name: "colonnes" }));
+  await user.click(screen.getByRole("checkbox", { name: "poids" }));
+  await user.click(screen.getByRole("checkbox", { name: "temps" }));
+  const cells = screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell"));
+  const last = (i: number) => cells[i].slice(-2).map((c) => c.textContent);
+  expect(last(0)).toEqual(["84 Ko", "212 ms"]);
+  expect(last(1)).toEqual(["–", "5 ms"]);
+});
+
+test("un clic sur l’en-tête poids trie le tableau", async () => {
+  const user = userEvent.setup();
+  localStorage.setItem("arpenteur.columns", JSON.stringify(["url", "size"]));
+  renderTable([
+    row("https://exemple.fr/a", "yes", { size: 90000 }),
+    row("https://exemple.fr/b", "yes", { size: 500 }),
+  ]);
+  await user.click(screen.getByRole("columnheader", { name: "poids" }));
+  const urls = screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0].textContent);
+  expect(urls).toEqual(["https://exemple.fr/b", "https://exemple.fr/a"]);
 });

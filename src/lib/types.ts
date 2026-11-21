@@ -140,7 +140,9 @@ export interface UrlRow {
   status: number;
   contentType: string;
   title: string | null;
+  titleLength: number | null;
   metaDescription: string | null;
+  metaDescriptionLength: number | null;
   h1: string | null;
   h1Count: number;
   canonical: string | null;
@@ -149,6 +151,7 @@ export interface UrlRow {
   inlinks: number;
   wordCount: number | null;
   size: number | null;
+  elapsedMs: number;
 }
 
 export interface CrawlMeta {

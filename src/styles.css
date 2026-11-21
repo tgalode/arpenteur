@@ -762,3 +762,34 @@ select {
   font-size: 12px;
   white-space: pre-wrap;
 }
+
+.columns-picker {
+  position: relative;
+}
+
+.columns-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.columns-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.columns-list label:hover {
+  background: var(--sel);
+}

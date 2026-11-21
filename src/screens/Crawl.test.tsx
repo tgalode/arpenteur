@@ -48,7 +48,9 @@ function row(url: string, over: Partial<UrlRow> = {}): UrlRow {
     status: 200,
     contentType: "text/html",
     title: null,
+    titleLength: null,
     metaDescription: null,
+    metaDescriptionLength: null,
     h1: null,
     h1Count: 0,
     canonical: null,
@@ -57,6 +59,7 @@ function row(url: string, over: Partial<UrlRow> = {}): UrlRow {
     inlinks: 0,
     wordCount: 10,
     size: null,
+    elapsedMs: 0,
     ...over,
   };
 }

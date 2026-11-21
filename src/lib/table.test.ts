@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { filterRows, httpTone, sortRows, statusText, statusTone } from "./table";
+import { filterRows, formatMs, formatSizeKo, httpTone, sortRows, statusText, statusTone } from "./table";
 import type { UrlRow } from "./types";
 
 function row(p: Partial<UrlRow>): UrlRow {
@@ -8,7 +8,9 @@ function row(p: Partial<UrlRow>): UrlRow {
     status: 200,
     contentType: "html",
     title: null,
+    titleLength: null,
     metaDescription: null,
+    metaDescriptionLength: null,
     h1: null,
     h1Count: 0,
     canonical: null,
@@ -17,11 +19,24 @@ function row(p: Partial<UrlRow>): UrlRow {
     inlinks: 0,
     wordCount: null,
     size: null,
+    elapsedMs: 0,
     ...p,
   };
 }
 
 describe("sortRows", () => {
+  test("le tri fonctionne sur poids et temps de réponse", () => {
+    const rows = [
+      row({ size: 500, elapsedMs: 300 }),
+      row({ size: null, elapsedMs: 10 }),
+      row({ size: 90000, elapsedMs: 120 }),
+    ];
+    expect(sortRows(rows, "size", "asc").map((r) => r.size)).toEqual([500, 90000, null]);
+    expect(sortRows(rows, "size", "desc").map((r) => r.size)).toEqual([90000, 500, null]);
+    expect(sortRows(rows, "elapsedMs", "asc").map((r) => r.elapsedMs)).toEqual([10, 120, 300]);
+    expect(sortRows(rows, "elapsedMs", "desc").map((r) => r.elapsedMs)).toEqual([300, 120, 10]);
+  });
+
   test("sortRows met les valeurs nulles en dernier", () => {
     const rows = [row({ depth: 2 }), row({ depth: null }), row({ depth: 0 })];
     expect(sortRows(rows, "depth", "asc").map((r) => r.depth)).toEqual([0, 2, null]);
@@ -107,4 +122,21 @@ test("httpTone colore les statuts HTTP", () => {
   expect(httpTone(503)).toBe("err");
   expect(httpTone(-1)).toBe("err");
   expect(httpTone(-6)).toBe("dim");
+});
+
+describe("formats du tableau", () => {
+  test("le poids est arrondi au Ko le plus proche", () => {
+    expect(formatSizeKo(86016)).toBe("84 Ko");
+    expect(formatSizeKo(1535)).toBe("1 Ko");
+    expect(formatSizeKo(1536)).toBe("2 Ko");
+  });
+
+  test("un poids non nul ne s’affiche jamais 0 Ko", () => {
+    expect(formatSizeKo(1)).toBe("1 Ko");
+    expect(formatSizeKo(0)).toBe("0 Ko");
+  });
+
+  test("le temps de réponse est en ms", () => {
+    expect(formatMs(212)).toBe("212 ms");
+  });
 });
