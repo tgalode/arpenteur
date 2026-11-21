@@ -44,11 +44,13 @@ function result(findings: Finding[], urls: string[]): CrawlResult {
     pages: urls.map(page),
     links: { inlinks: {}, depth: {}, redirectChains: {} },
     sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [], robotsTxt: null },
+    externalLinks: [],
+    externalUnchecked: 0,
   };
 }
 
-function detail(url: string, findings: Finding[], urls: string[]) {
-  const r = result(findings, urls);
+function detail(url: string, findings: Finding[], urls: string[], extra: Partial<CrawlResult> = {}) {
+  const r = { ...result(findings, urls), ...extra };
   render(<UrlDetail row={row(url)} result={r} />);
   return within(screen.getByRole("region"));
 }
@@ -125,4 +127,66 @@ test("un même constat reçu deux fois n'est montré qu'une fois", () => {
   const dup = finding({ code: "brokenInternalLink", url: site("/m1"), related: [site("/a"), site("/a")] });
   const view = detail(site("/a"), [dup, { ...dup }], [site("/a"), site("/m1")]);
   expect(view.getAllByText("Lien interne cassé")).toHaveLength(1);
+});
+
+test("le détail d'une page liste ses liens externes cassés avec leur adresse", () => {
+  const dead = "https://autre.exemple/mort";
+  const findings = [finding({ code: "brokenExternalLink", url: dead, related: [site("/a")], detail: "404" })];
+  const urls = [site("/a"), site("/b")];
+  const source = detail(site("/a"), findings, urls);
+  expect(source.getAllByText("Lien externe cassé")).toHaveLength(1);
+  expect(source.getByText(`vers ${dead}`)).toBeTruthy();
+  expect(source.getByText("404")).toBeTruthy();
+  cleanup();
+  const other = detail(site("/b"), findings, urls);
+  expect(other.queryByText("Lien externe cassé")).toBeNull();
+});
+
+function withLinks(hrefs: string[]): PageRecord {
+  const base = page(site("/a"));
+  return {
+    ...base,
+    facts: {
+      title: null,
+      metaDescription: null,
+      h1: [],
+      canonical: null,
+      metaRobots: null,
+      links: hrefs.map((href) => ({ href, anchor: "", nofollow: false })),
+      images: [],
+      jsonLd: [],
+      wordCount: 10,
+      textHash: "x",
+      lang: null,
+      headings: [],
+      unlinkedPhones: [],
+    },
+  };
+}
+
+test("un lien sortant externe vérifié affiche son statut", () => {
+  const checked = "https://autre.exemple/ok";
+  const gone = "https://disparu.exemple/";
+  const unchecked = "https://jamais.exemple/";
+  const view = detail(site("/a"), [], [site("/a")], {
+    pages: [withLinks([checked, gone, unchecked, site("/b")])],
+    externalLinks: [
+      { url: checked, outcome: "ok", status: 200, finalUrl: null },
+      { url: gone, outcome: "broken", status: null, finalUrl: null },
+    ],
+  });
+  const li = (href: string) => view.getByText(href).closest("li")!;
+  expect(within(li(checked)).getByText("200")).toBeTruthy();
+  expect(within(li(gone)).getByText("domaine introuvable")).toBeTruthy();
+  expect(li(unchecked).textContent).toBe(`${unchecked} –`);
+  expect(li(site("/b")).textContent).toBe(`${site("/b")} –`);
+});
+
+test("un lien externe cassé en 404 affiche 404 dans les liens sortants", () => {
+  const dead = "https://autre.exemple/mort";
+  const view = detail(site("/a"), [], [site("/a")], {
+    pages: [withLinks([dead])],
+    externalLinks: [{ url: dead, outcome: "broken", status: 404, finalUrl: null }],
+  });
+  expect(within(view.getByText(dead).closest("li")!).getByText("404")).toBeTruthy();
 });

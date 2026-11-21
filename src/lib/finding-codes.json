@@ -35,5 +35,6 @@
   "phoneNotClickable",
   "modernCompressionMissing",
   "httpsInvalid",
-  "securityHeadersMissing"
+  "securityHeadersMissing",
+  "brokenExternalLink"
 ]

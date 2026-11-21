@@ -19,10 +19,10 @@ test("chaque code de finding-codes.json a une entrée et ses textes", () => {
   }
 });
 
-test("répartition validée : 7 haute, 14 moyenne, 12 basse, 4 info", () => {
+test("répartition validée : 7 haute, 15 moyenne, 12 basse, 4 info", () => {
   const count = (level: string) => allCodes.filter((c) => CATALOG[c].level === level).length;
   expect(count("haute")).toBe(7);
-  expect(count("moyenne")).toBe(14);
+  expect(count("moyenne")).toBe(15);
   expect(count("basse")).toBe(12);
   expect(count("info")).toBe(4);
 });
@@ -34,4 +34,13 @@ test("textes repris du catalogue", () => {
   );
   expect(findingFix("canonicalToRedirect")).toBe("Pointer le canonical vers l'adresse finale.");
   expect(findingTitle("httpsInvalid")).toBe("Certificat HTTPS invalide");
+});
+
+test("brokenExternalLink reprend les textes de la conception", () => {
+  expect(CATALOG.brokenExternalLink.level).toBe("moyenne");
+  expect(findingTitle("brokenExternalLink")).toBe("Lien externe cassé");
+  expect(findingWhy("brokenExternalLink")).toBe(
+    "Une page du site pointe vers une adresse d'un autre site qui n'existe plus. Le visiteur qui clique tombe sur une erreur.",
+  );
+  expect(findingFix("brokenExternalLink")).toBe("Corriger le lien ou le retirer.");
 });

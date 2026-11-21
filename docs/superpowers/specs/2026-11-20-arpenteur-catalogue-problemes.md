@@ -47,6 +47,7 @@ Les seuils viennent de la conception (D5) et restent réglables.
 | `sitemapUrlNonIndexable` | Adresse du sitemap non indexable | Le sitemap annonce une page en noindex ou qui désigne une autre page comme référence. | Retirer cette adresse du sitemap. | nous |
 | `imageMissingAlt` | Image sans texte alternatif | L'image est invisible pour Google Images et pour les lecteurs d'écran. | Ajouter un attribut alt qui décrit l'image. | SiteOne |
 | `imageTooHeavy` | Image lourde (plus de 200 Ko) | L'image ralentit le chargement de la page. | Compresser l'image ou la convertir en WebP ou AVIF. | nous |
+| `brokenExternalLink` | Lien externe cassé | Une page du site pointe vers une adresse d'un autre site qui n'existe plus. Le visiteur qui clique tombe sur une erreur. | Corriger le lien ou le retirer. | nous |
 
 ## Basse
 

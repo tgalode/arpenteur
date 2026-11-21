@@ -1,7 +1,7 @@
 import { t } from "../i18n/fr";
 import { CATALOG, findingFix, findingTitle, findingWhy, LEVELS } from "../lib/catalog";
 import { normalizeUrl } from "../lib/urls";
-import type { CrawlResult, Finding, FindingCode, UrlRow } from "../lib/types";
+import type { CrawlResult, ExternalCheck, Finding, FindingCode, UrlRow } from "../lib/types";
 import { levelLabel } from "./ProblemsPanel";
 
 // Codes dont les URL liées sont les pages qui portent le problème (le constat est sur la cible).
@@ -9,6 +9,7 @@ import { levelLabel } from "./ProblemsPanel";
 const CARRIER_CODES: Partial<Record<FindingCode, "detail_problem_link_to" | "detail_problem_image">> = {
   brokenInternalLink: "detail_problem_link_to",
   imageTooHeavy: "detail_problem_image",
+  brokenExternalLink: "detail_problem_link_to",
 };
 
 interface Problem {
@@ -33,6 +34,12 @@ function problemsOf(url: string, findings: Finding[]): Problem[] {
   return out.sort((a, b) => LEVELS.indexOf(CATALOG[a.finding.code].level) - LEVELS.indexOf(CATALOG[b.finding.code].level));
 }
 
+function externalStatus(check: ExternalCheck | undefined): string | null {
+  if (!check) return null;
+  if (check.status === null) return check.outcome === "broken" ? t("detail_externalStatus_unreachable") : null;
+  return String(check.status);
+}
+
 export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult }) {
   const page = result.pages.find((p) => p.url === row.url);
   const facts = page?.facts ?? null;
@@ -43,6 +50,8 @@ export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult })
   const headers = Object.entries(page?.headers ?? {});
   const canonical = facts?.canonical ?? row.canonical;
   const metaDescription = facts?.metaDescription ?? row.metaDescription;
+
+  const externals = new Map(result.externalLinks.map((c) => [c.url, c]));
 
   const problems = problemsOf(row.url, result.findings);
 
@@ -128,11 +137,15 @@ export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult })
         {t("detail_outlinks")} ({outlinks.length})
       </h3>
       <ul>
-        {outlinks.map((l, i) => (
-          <li key={i}>
-            <span>{l.href}</span> <span>{l.anchor || t("none")}</span>
-          </li>
-        ))}
+        {outlinks.map((l, i) => {
+          const status = externalStatus(externals.get(normalizeUrl(l.href)));
+          return (
+            <li key={i}>
+              <span>{l.href}</span> <span>{l.anchor || t("none")}</span>
+              {status && <span className="dim"> {status}</span>}
+            </li>
+          );
+        })}
       </ul>
       <h3>{t("detail_headers")}</h3>
       <ul>

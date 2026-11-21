@@ -16,6 +16,7 @@ const defaults: CrawlSettings = {
   maxReqsPerSec: 2,
   maxRequests: 10000,
   respectRobots: true,
+  checkExternalLinks: true,
   userAgent: null,
   includeRegex: [],
   ignoreRegex: [],
@@ -116,4 +117,24 @@ test("retour appelle onBack", async () => {
   render(<Settings onBack={onBack} />);
   await userEvent.click(await screen.findByRole("button", { name: "retour" }));
   expect(onBack).toHaveBeenCalled();
+});
+
+test("la case « vérifier les liens externes » est cochée par défaut et s'enregistre", async () => {
+  vi.mocked(api.saveSettings).mockResolvedValue(undefined);
+  render(<Settings onBack={() => {}} />);
+  const box = (await screen.findByLabelText("vérifier les liens externes")) as HTMLInputElement;
+  expect(box.checked).toBe(true);
+  await userEvent.click(box);
+  await userEvent.click(screen.getByRole("button", { name: "enregistrer" }));
+  await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith({ ...defaults, checkExternalLinks: false }));
+});
+
+test("des réglages reçus sans le champ comptent la case comme cochée", async () => {
+  vi.mocked(api.saveSettings).mockResolvedValue(undefined);
+  const { checkExternalLinks: _omitted, ...old } = defaults;
+  vi.mocked(api.getSettings).mockResolvedValue(old as CrawlSettings);
+  render(<Settings onBack={() => {}} />);
+  expect(((await screen.findByLabelText("vérifier les liens externes")) as HTMLInputElement).checked).toBe(true);
+  await userEvent.click(screen.getByRole("button", { name: "enregistrer" }));
+  await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith(defaults));
 });

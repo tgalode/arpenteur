@@ -206,6 +206,13 @@ export function Crawl({
               {message}
             </p>
           )}
+          {result.externalUnchecked > 0 && (
+            <p role="status" className="crawl-banner tone-warn">
+              {result.externalUnchecked === 1
+                ? t("externalUncheckedOne")
+                : t("externalUncheckedMany", { count: result.externalUnchecked })}
+            </p>
+          )}
           <div className="crawl-body">
             <ProblemsPanel findings={result.findings} selectedCode={selectedCode} onSelect={setSelectedCode} />
             <div className="crawl-main">

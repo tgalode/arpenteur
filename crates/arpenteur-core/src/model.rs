@@ -199,6 +199,7 @@ pub enum FindingCode {
     ModernCompressionMissing,
     HttpsInvalid,
     SecurityHeadersMissing,
+    BrokenExternalLink,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -318,4 +319,8 @@ pub struct CrawlResult {
     pub pages: Vec<PageRecord>,
     pub links: LinkReport,
     pub sitemap: SitemapResult,
+    #[serde(default)]
+    pub external_links: Vec<ExternalCheck>,
+    #[serde(default)]
+    pub external_unchecked: u32,
 }

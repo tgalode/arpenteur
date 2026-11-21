@@ -9,6 +9,7 @@ interface Form {
   maxRequests: string;
   limitThreshold: string;
   respectRobots: boolean;
+  checkExternalLinks: boolean;
   userAgent: string;
   include: string;
   ignore: string;
@@ -21,6 +22,7 @@ function toForm(s: CrawlSettings): Form {
     maxRequests: String(s.maxRequests),
     limitThreshold: String(s.limitThreshold),
     respectRobots: s.respectRobots,
+    checkExternalLinks: s.checkExternalLinks ?? true,
     userAgent: s.userAgent ?? "",
     include: s.includeRegex.join("\n"),
     ignore: s.ignoreRegex.join("\n"),
@@ -68,6 +70,7 @@ function toSettings(form: Form): { settings?: CrawlSettings; errors: string[] } 
       maxRequests,
       limitThreshold,
       respectRobots: form.respectRobots,
+      checkExternalLinks: form.checkExternalLinks,
       userAgent: userAgent === "" ? null : userAgent,
       includeRegex: lines(form.include),
       ignoreRegex: lines(form.ignore),
@@ -188,6 +191,14 @@ export default function Settings({ onBack }: { onBack: () => void }) {
                 onChange={(e) => edit({ respectRobots: e.target.checked })}
               />
               <span>{t("settings_respectRobots")}</span>
+            </label>
+            <label className="settings-row settings-check">
+              <input
+                type="checkbox"
+                checked={form.checkExternalLinks}
+                onChange={(e) => edit({ checkExternalLinks: e.target.checked })}
+              />
+              <span>{t("settings_checkExternalLinks")}</span>
             </label>
             <label className="settings-row">
               <span>{t("settings_userAgent")}</span>

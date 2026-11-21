@@ -33,6 +33,7 @@ function meta(status: CrawlStatus, id = "abc"): CrawlMeta {
       maxReqsPerSec: 2,
       maxRequests: 10000,
       respectRobots: true,
+      checkExternalLinks: true,
       userAgent: null,
       includeRegex: [],
       ignoreRegex: [],
@@ -106,6 +107,8 @@ function result(status: CrawlStatus): CrawlResult {
       redirectChains: {},
     },
     sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [], robotsTxt: null },
+    externalLinks: [],
+    externalUnchecked: 0,
   };
 }
 
@@ -234,6 +237,21 @@ test("un crawl arrêté affiche son bandeau", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "stopped" }));
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
   expect(await screen.findByText("crawl arrêté avant la fin.")).toBeTruthy();
+});
+
+test("l'écran du crawl signale les liens externes non vérifiés", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue({ ...result({ kind: "completed" }), externalUnchecked: 12 });
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  expect(await screen.findByText("12 liens externes non vérifiés (limite de requêtes atteinte)")).toBeTruthy();
+  cleanup();
+  vi.mocked(api.loadCrawl).mockResolvedValue({ ...result({ kind: "completed" }), externalUnchecked: 1 });
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  expect(await screen.findByText("1 lien externe non vérifié (limite de requêtes atteinte)")).toBeTruthy();
+  cleanup();
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByText("https://exemple.fr/tarifs");
+  expect(screen.queryByText(/non vérifié/)).toBeNull();
 });
 
 test("un crawl interrompu conseille de baisser le débit", async () => {

@@ -28,6 +28,7 @@ function meta(id: string, status: CrawlStatus): CrawlMeta {
       maxReqsPerSec: 2,
       maxRequests: 10000,
       respectRobots: true,
+      checkExternalLinks: true,
       userAgent: null,
       includeRegex: [],
       ignoreRegex: [],
@@ -45,6 +46,8 @@ function result(id: string, status: CrawlStatus): CrawlResult {
     pages: [],
     links: { inlinks: {}, depth: {}, redirectChains: {} },
     sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [], robotsTxt: null },
+    externalLinks: [],
+    externalUnchecked: 0,
   };
 }
 

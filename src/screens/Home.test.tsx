@@ -29,6 +29,7 @@ function meta(
       maxReqsPerSec: 2,
       maxRequests: 10000,
       respectRobots: true,
+      checkExternalLinks: true,
       userAgent: null,
       includeRegex: [],
       ignoreRegex: [],

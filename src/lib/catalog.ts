@@ -28,6 +28,7 @@ export const CATALOG: Record<FindingCode, { level: Level }> = {
   sitemapUrlNonIndexable: { level: "moyenne" },
   imageMissingAlt: { level: "moyenne" },
   imageTooHeavy: { level: "moyenne" },
+  brokenExternalLink: { level: "moyenne" },
   titleTooLong: { level: "basse" },
   titleTooShort: { level: "basse" },
   metaDescriptionTooLong: { level: "basse" },

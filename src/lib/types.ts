@@ -7,6 +7,7 @@ export interface CrawlSettings {
   includeRegex: string[];
   ignoreRegex: string[];
   limitThreshold: number;
+  checkExternalLinks: boolean;
 }
 
 export type CrawlStatus =
@@ -124,7 +125,8 @@ export type FindingCode =
   | "canonicalToOtherUrl"
   | "noindex"
   | "notInSitemap"
-  | "thinContent";
+  | "thinContent"
+  | "brokenExternalLink";
 
 export interface Finding {
   code: FindingCode;
@@ -170,6 +172,14 @@ export interface SiteSummary {
   crawls: CrawlMeta[];
 }
 
+export interface ExternalCheck {
+  url: string;
+  outcome: "ok" | "broken" | "unknown";
+  /** Statut final ; null sans réponse. */
+  status: number | null;
+  finalUrl: string | null;
+}
+
 export interface CrawlResult {
   meta: CrawlMeta;
   rows: UrlRow[];
@@ -177,6 +187,8 @@ export interface CrawlResult {
   pages: PageRecord[];
   links: LinkReport;
   sitemap: SitemapResult;
+  externalLinks: ExternalCheck[];
+  externalUnchecked: number;
 }
 
 export interface StartedCrawl {

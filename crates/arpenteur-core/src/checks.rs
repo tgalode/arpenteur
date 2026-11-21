@@ -5,8 +5,9 @@ use url::Url;
 
 use crate::links::analyze_links;
 use crate::model::{
-    CollectedData, CrawlMeta, CrawlResult, CrawlStatus, FACTS_VERSION, Finding, FindingCode,
-    Indexability, LinkReport, PageFacts, PageRecord, SitemapResult, UrlRow,
+    CollectedData, CrawlMeta, CrawlResult, CrawlStatus, ExternalCheck, ExternalOutcome,
+    FACTS_VERSION, Finding, FindingCode, Indexability, LinkReport, PageFacts, PageRecord,
+    SitemapResult, UrlRow,
 };
 use crate::siteone::{SiteOneSummary, site_findings};
 use crate::urls::{is_same_site, normalize_url};
@@ -143,6 +144,7 @@ pub struct CheckInput<'a> {
     pub facts_version: u32,
     /// Crawl limité par le serveur : ses 503 et 429 ne sont pas des erreurs du site.
     pub throttled: bool,
+    pub external_links: &'a [ExternalCheck],
 }
 
 impl<'a> CheckInput<'a> {
@@ -160,6 +162,7 @@ impl<'a> CheckInput<'a> {
             start_content_encoding: None,
             facts_version: FACTS_VERSION,
             throttled: false,
+            external_links: &[],
         }
     }
 }
@@ -173,6 +176,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
         start_content_encoding,
         facts_version,
         throttled,
+        external_links,
     } = *input;
     let start = Url::parse(&norm(start_url)).ok();
     let is_internal = |raw: &str| match (&start, Url::parse(&norm(raw))) {
@@ -334,6 +338,40 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
                 target,
                 related.into_iter().collect(),
                 None,
+            );
+        }
+    }
+
+    let broken: BTreeMap<&str, Option<u16>> = external_links
+        .iter()
+        .filter(|c| c.outcome == ExternalOutcome::Broken)
+        .map(|c| (c.url.as_str(), c.status))
+        .collect();
+    if !broken.is_empty() {
+        let mut sources: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for page in pages.iter().filter(|p| is_internal(&p.url)) {
+            for link in page.facts.iter().flat_map(|f| &f.links) {
+                let target = norm(&link.href);
+                if broken.contains_key(target.as_str()) {
+                    sources.entry(target).or_default().insert(page.url.clone());
+                }
+            }
+        }
+        for check in external_links
+            .iter()
+            .filter(|c| c.outcome == ExternalOutcome::Broken)
+        {
+            let Some(from) = sources.remove(&check.url) else {
+                continue;
+            };
+            let detail = check
+                .status
+                .map_or_else(|| "domaine introuvable".to_string(), |s| s.to_string());
+            push(
+                FindingCode::BrokenExternalLink,
+                &check.url,
+                from.into_iter().collect(),
+                Some(detail),
             );
         }
     }
@@ -517,6 +555,7 @@ pub fn assemble(
         start_content_encoding: data.start_content_encoding.as_deref(),
         facts_version: data.facts_version,
         throttled: meta.status == CrawlStatus::Throttled,
+        external_links: &data.external_links,
         ..CheckInput::new(&data.pages, &links, &data.sitemap, &meta.start_url)
     });
     if let Some(summary) = &siteone {
@@ -530,6 +569,8 @@ pub fn assemble(
         pages: data.pages,
         links,
         sitemap: data.sitemap,
+        external_links: data.external_links,
+        external_unchecked: data.external_unchecked,
     }
 }
 
@@ -1099,7 +1140,10 @@ mod tests {
     #[test]
     fn row_lengths_are_counted_after_whitespace_collapse() {
         let pages = vec![
-            html("/a").title(Some("a   b")).meta(Some(" x \n y  z ")).rec(),
+            html("/a")
+                .title(Some("a   b"))
+                .meta(Some(" x \n y  z "))
+                .rec(),
             html("/b").title(None).meta(None).rec(),
             html("/c").title(Some("   ")).rec(),
         ];
@@ -1692,6 +1736,98 @@ mod tests {
         }
     }
 
+    fn ext(url: &str, outcome: ExternalOutcome, status: Option<u16>) -> ExternalCheck {
+        ExternalCheck {
+            url: url.to_string(),
+            outcome,
+            status,
+            final_url: None,
+        }
+    }
+
+    fn check_external(pages: &[PageRecord], external: &[ExternalCheck]) -> Vec<Finding> {
+        let links = analyze_links(pages, START);
+        let sm = no_sitemap();
+        run_checks(&CheckInput {
+            external_links: external,
+            ..CheckInput::new(pages, &links, &sm, START)
+        })
+    }
+
+    #[test]
+    fn broken_external_link_lists_its_source_pages() {
+        let dead = "https://exemple.fr/mort";
+        let pages = [
+            clean("/").links(&["/a", "/b", "/c"]).rec(),
+            clean("/a").links(&[dead]).rec(),
+            clean("/b")
+                .links(&["https://exemple.fr/mort#ancre", "/a"])
+                .rec(),
+            clean("/c")
+                .links(&[dead, "https://exemple.fr/vivant"])
+                .rec(),
+        ];
+        let external = [
+            ext(dead, ExternalOutcome::Broken, Some(404)),
+            ext("https://exemple.fr/vivant", ExternalOutcome::Ok, Some(200)),
+        ];
+        let f = check_external(&pages, &external);
+        let found = of(&f, FindingCode::BrokenExternalLink);
+        assert_eq!(found.len(), 1, "{f:?}");
+        assert_eq!(found[0].url, dead);
+        assert_eq!(found[0].related, vec![full("/a"), full("/b"), full("/c")]);
+        assert_eq!(found[0].detail.as_deref(), Some("404"));
+    }
+
+    #[test]
+    fn broken_external_link_detail_follows_the_status() {
+        let pages = [clean("/")
+            .links(&[
+                "https://exemple.fr/a",
+                "https://exemple.fr/b",
+                "https://disparu.exemple/",
+            ])
+            .rec()];
+        let external = [
+            ext("https://exemple.fr/a", ExternalOutcome::Broken, Some(410)),
+            ext("https://exemple.fr/b", ExternalOutcome::Broken, Some(404)),
+            ext("https://disparu.exemple/", ExternalOutcome::Broken, None),
+        ];
+        let f = check_external(&pages, &external);
+        let detail_of = |url: &str| {
+            of(&f, FindingCode::BrokenExternalLink)
+                .iter()
+                .find(|x| x.url == url)
+                .and_then(|x| x.detail.clone())
+        };
+        assert_eq!(detail_of("https://exemple.fr/a").as_deref(), Some("410"));
+        assert_eq!(detail_of("https://exemple.fr/b").as_deref(), Some("404"));
+        assert_eq!(
+            detail_of("https://disparu.exemple/").as_deref(),
+            Some("domaine introuvable")
+        );
+    }
+
+    #[test]
+    fn ok_and_unknown_external_links_give_no_finding() {
+        let pages = [clean("/")
+            .links(&["https://exemple.fr/a", "https://exemple.fr/b"])
+            .rec()];
+        let external = [
+            ext("https://exemple.fr/a", ExternalOutcome::Ok, Some(200)),
+            ext("https://exemple.fr/b", ExternalOutcome::Unknown, Some(403)),
+        ];
+        let f = check_external(&pages, &external);
+        assert!(of(&f, FindingCode::BrokenExternalLink).is_empty(), "{f:?}");
+        assert!(
+            of(
+                &check(&pages, &no_sitemap()),
+                FindingCode::BrokenExternalLink
+            )
+            .is_empty()
+        );
+    }
+
     #[test]
     fn findings_without_detail_load_from_older_saves() {
         let f: Finding =
@@ -1741,6 +1877,7 @@ mod tests {
             ModernCompressionMissing => 34,
             HttpsInvalid => 35,
             SecurityHeadersMissing => 36,
+            BrokenExternalLink => 37,
         }
     }
 
@@ -1785,6 +1922,7 @@ mod tests {
             ModernCompressionMissing,
             HttpsInvalid,
             SecurityHeadersMissing,
+            BrokenExternalLink,
         ];
         for (i, code) in all.iter().enumerate() {
             assert_eq!(declared_index(code), i, "ordre de déclaration : {code:?}");
