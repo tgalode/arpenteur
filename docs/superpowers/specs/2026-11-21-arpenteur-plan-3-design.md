@@ -162,7 +162,9 @@ Tout le reste ne donne pas de constat : 401, 403, 429, 999, les 5xx, un délai d
 - Toutes les URL doivent être en `http` ou `https` et sur le même site que la première. Sinon le lancement est refusé, avec la liste des lignes fautives.
 - La liste ne peut pas dépasser la limite de requêtes.
 - Les URL interdites par robots.txt ou exclues par tes motifs ne sont pas demandées. L'écran du crawl dit combien ont été écartées et pourquoi. Si toutes le sont, le lancement est refusé avec un message.
-- Les liens ne sont pas suivis et le sitemap n'est pas lu. Les seules adresses demandées en plus de la liste sont les cibles de redirection : si `/tarifs` redirige vers `/tarifs/`, la cible est demandée et apparaît dans le tableau avec la mention « hors liste ». On voit ainsi où mène chaque redirection, et les constats de redirection restent justes.
+- Les liens ne sont pas suivis et le sitemap n'est pas lu. Deux sortes d'adresses sont demandées en plus de la liste :
+  - les cibles de redirection : si `/tarifs` redirige vers `/tarifs/`, la cible est demandée et apparaît dans le tableau avec la mention « hors liste ». On voit ainsi où mène chaque redirection, et les constats de redirection restent justes ;
+  - les images des pages listées, comme pour un crawl de site : le contrôle « image trop lourde » en a besoin. Une image ne porte jamais la mention « hors liste ». (Ajout du 21 novembre, pendant l'implémentation : SiteOne les demande même sans suivre les liens.)
 
 **Ce qui change dans les résultats.**
 - Les contrôles qui ont besoin du site entier ne tournent pas : page orpheline, page absente du sitemap, sitemap introuvable, URL du sitemap en erreur ou non indexable.
@@ -203,3 +205,4 @@ Tu ne les as pas décidés. Chacun est suivi de ce qu'il coûte s'il est faux.
 13. **Sur une page en noindex, seuls les huit constats de title, de meta description et de H1 s'arrêtent.** Si c'est faux : il reste du bruit (images, langue) sur ces pages, ou au contraire il en manque.
 14. **Les titres de `footer`, `nav` et `aside` sortent seulement du contrôle des niveaux sautés**, pas de la détection des H1. Si c'est faux : un H1 placé dans un menu compte toujours.
 15. **Les lignes sondées ne comptent plus dans le nombre d'URL d'un crawl.** Si c'est faux : un compteur à remettre.
+16. **En mode liste, les images des pages listées sont demandées** (ajout pendant l'implémentation). Si c'est faux : un motif pour les écarter en mode liste, et le contrôle de poids des images disparaît dans ce mode.
