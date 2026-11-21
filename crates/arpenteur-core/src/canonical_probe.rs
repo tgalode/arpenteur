@@ -8,6 +8,7 @@ use reqwest::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
+use crate::checks::reference_page;
 use crate::model::PageRecord;
 use crate::urls::{is_same_site, normalize_url};
 
@@ -164,18 +165,7 @@ pub async fn run_post_crawl_probes(
     let mut budget = max_requests.saturating_sub(pages.len());
     let mut content_encoding = None;
     if budget > 0 && !cancel.is_cancelled() {
-        let samplable = |p: &&PageRecord| p.is_html() && p.status == 200;
-        let start_key = normalize_url(start.as_str());
-        let sample = pages
-            .iter()
-            .filter(samplable)
-            .find(|p| normalize_url(&p.url) == start_key)
-            .or_else(|| {
-                pages
-                    .iter()
-                    .filter(samplable)
-                    .find(|p| Url::parse(&p.url).is_ok_and(|u| is_same_site(start, &u)))
-            });
+        let sample = reference_page(pages, start.as_str());
         if let Some(url) = sample.and_then(|p| Url::parse(&p.url).ok()) {
             budget -= 1;
             tokio::select! {

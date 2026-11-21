@@ -5,17 +5,10 @@ use serde_json::Value;
 use crate::model::{Finding, FindingCode};
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct SecurityIssue {
-    pub header: String,
-    pub recommendation: String,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SiteOneSummary {
     pub certificate_errors: Vec<String>,
     pub certificate_expired: bool,
     pub certificate_issuer: Option<String>,
-    pub security_issues: Vec<SecurityIssue>,
 }
 
 fn rows<'a>(root: &'a Value, table: &str) -> &'a [Value] {
@@ -26,11 +19,6 @@ fn rows<'a>(root: &'a Value, table: &str) -> &'a [Value] {
 
 fn text<'a>(row: &'a Value, key: &str) -> &'a str {
     row.get(key).and_then(Value::as_str).unwrap_or("").trim()
-}
-
-/// Les colonnes de la table `security` sont des compteurs d'URL, en texte.
-fn count(row: &Value, key: &str) -> u64 {
-    text(row, key).parse().unwrap_or(0)
 }
 
 /// Début des messages d'échec de connexion de l'analyse TLS de SiteOne : elle ouvre
@@ -79,15 +67,6 @@ pub fn read_siteone(json: &str) -> Option<SiteOneSummary> {
         }
     }
 
-    // SiteOne compte, par en-tête, les URL en avertissement ou en critique.
-    for row in rows(&root, "security") {
-        if count(row, "warning") + count(row, "critical") > 0 {
-            summary.security_issues.push(SecurityIssue {
-                header: text(row, "header").to_string(),
-                recommendation: text(row, "recommendation").to_string(),
-            });
-        }
-    }
     Some(summary)
 }
 
@@ -108,24 +87,6 @@ pub fn site_findings(summary: &SiteOneSummary, start_url: &str) -> Vec<Finding> 
             detail: Some(detail),
         });
     }
-    if !summary.security_issues.is_empty() {
-        let recommendations: Vec<&str> = summary
-            .security_issues
-            .iter()
-            .map(|i| i.recommendation.as_str())
-            .filter(|r| !r.is_empty())
-            .collect();
-        out.push(Finding {
-            code: FindingCode::SecurityHeadersMissing,
-            url: start_url.to_string(),
-            related: summary
-                .security_issues
-                .iter()
-                .map(|i| i.header.clone())
-                .collect(),
-            detail: (!recommendations.is_empty()).then(|| recommendations.join(" ")),
-        });
-    }
     out
 }
 
@@ -135,10 +96,8 @@ mod tests {
 
     const START: &str = "https://x.fr/";
 
-    fn report(cert_rows: &str, security_rows: &str) -> String {
-        format!(
-            r#"{{"tables":{{"certificate-info":{{"rows":[{cert_rows}]}},"security":{{"rows":[{security_rows}]}}}}}}"#
-        )
+    fn report(cert_rows: &str) -> String {
+        format!(r#"{{"tables":{{"certificate-info":{{"rows":[{cert_rows}]}}}}}}"#)
     }
 
     const ISSUER: &str = r#"{"info":"Issuer","value":"C = US, O = Zscaler Inc., CN = Zscaler Intermediate Root CA (zscaler.net) (t) "}"#;
@@ -148,18 +107,13 @@ mod tests {
         r#"{"info":"Valid to","value":"Nov 17 02:06:20 2026 GMT (EXPIRED 3 day(s) ago)"}"#;
     const ERRORS_ROW: &str = r#"{"info":"Errors","value":"TLS handshake failed"}"#;
 
-    const CSP_WARNING: &str = r#"{"critical":"0","header":"Content-Security-Policy","highestSeverity":"3","notice":"0","ok":"0","recommendation":"Content-Security-Policy is set but weakened by 'unsafe-inline'.","warning":"11"}"#;
-    const HSTS_CRITICAL: &str = r#"{"critical":"11","header":"Strict-Transport-Security","highestSeverity":"4","notice":"0","ok":"0","recommendation":"Strict-Transport-Security is not set.","warning":"0"}"#;
-    const SERVER_NOTICE: &str = r#"{"critical":"0","header":"Server","highestSeverity":"2","notice":"11","ok":"0","recommendation":"Server header is set to 'railway-hikari'.","warning":"0"}"#;
-    const NOSNIFF_OK: &str = r#"{"critical":"0","header":"X-Content-Type-Options","highestSeverity":"1","notice":"0","ok":"11","recommendation":"","warning":"0"}"#;
-
     fn findings(json: &str) -> Vec<Finding> {
         site_findings(&read_siteone(json).unwrap(), START)
     }
 
     #[test]
     fn valid_certificate_gives_no_finding() {
-        let json = report(&[ISSUER, VALID_TO_OK].join(","), NOSNIFF_OK);
+        let json = report(&[ISSUER, VALID_TO_OK].join(","));
         let summary = read_siteone(&json).unwrap();
         assert!(summary.certificate_errors.is_empty());
         assert!(!summary.certificate_expired);
@@ -172,7 +126,7 @@ mod tests {
 
     #[test]
     fn expired_or_errored_certificate() {
-        let expired = findings(&report(&[ISSUER, VALID_TO_EXPIRED].join(","), ""));
+        let expired = findings(&report(&[ISSUER, VALID_TO_EXPIRED].join(",")));
         assert_eq!(expired.len(), 1);
         assert_eq!(expired[0].code, FindingCode::HttpsInvalid);
         assert_eq!(expired[0].url, START);
@@ -181,14 +135,14 @@ mod tests {
         assert!(detail.contains("EXPIRED 3 day(s) ago"), "{detail}");
         assert!(detail.contains("Zscaler Intermediate Root CA"), "{detail}");
 
-        let errored = findings(&report(&[ISSUER, VALID_TO_OK, ERRORS_ROW].join(","), ""));
+        let errored = findings(&report(&[ISSUER, VALID_TO_OK, ERRORS_ROW].join(",")));
         assert_eq!(errored.len(), 1);
         assert_eq!(errored[0].code, FindingCode::HttpsInvalid);
         let detail = errored[0].detail.as_deref().unwrap();
         assert!(detail.contains("TLS handshake failed"), "{detail}");
         assert!(detail.contains("Zscaler"), "{detail}");
 
-        let no_issuer = findings(&report(ERRORS_ROW, ""));
+        let no_issuer = findings(&report(ERRORS_ROW));
         assert_eq!(no_issuer.len(), 1);
         assert_eq!(no_issuer[0].detail.as_deref(), Some("TLS handshake failed"));
     }
@@ -205,14 +159,14 @@ mod tests {
             "Invalid hostname 'exemple_fr': invalid dns name",
         ] {
             let row = format!(r#"{{"info":"Errors","value":"{message}"}}"#);
-            let json = report(&row, "");
+            let json = report(&row);
             let summary = read_siteone(&json).unwrap();
             assert!(summary.certificate_errors.is_empty(), "{message}");
             assert!(findings(&json).is_empty(), "{message}");
         }
-        let json = report(&[ISSUER, CONNECT_FAILURE].join(","), "");
+        let json = report(&[ISSUER, CONNECT_FAILURE].join(","));
         assert!(findings(&json).is_empty());
-        let json = report(&[ISSUER, VALID_TO_OK, CONNECT_FAILURE].join(","), "");
+        let json = report(&[ISSUER, VALID_TO_OK, CONNECT_FAILURE].join(","));
         assert!(findings(&json).is_empty());
     }
 
@@ -224,7 +178,7 @@ mod tests {
             "SSL/TLS certificate is not valid yet, valid from Nov 30 2026.",
         ] {
             let row = format!(r#"{{"info":"Errors","value":"{message}"}}"#);
-            let f = findings(&report(&row, ""));
+            let f = findings(&report(&row));
             assert_eq!(f.len(), 1, "{message}");
             assert_eq!(f[0].detail.as_deref(), Some(message));
         }
@@ -233,7 +187,7 @@ mod tests {
     #[test]
     fn expiry_is_said_once_in_the_real_row_order() {
         // SiteOne écrit « Valid to » (EXPIRED) puis « Errors » avec le même fait.
-        let json = report(&[ISSUER, VALID_TO_EXPIRED, EXPIRED_ERROR].join(","), "");
+        let json = report(&[ISSUER, VALID_TO_EXPIRED, EXPIRED_ERROR].join(","));
         let f = findings(&json);
         assert_eq!(f.len(), 1);
         let detail = f[0].detail.as_deref().unwrap();
@@ -245,7 +199,7 @@ mod tests {
         assert!(detail.contains("Zscaler"), "{detail}");
 
         // Ordre inverse : même résultat.
-        let json = report(&[ISSUER, EXPIRED_ERROR, VALID_TO_EXPIRED].join(","), "");
+        let json = report(&[ISSUER, EXPIRED_ERROR, VALID_TO_EXPIRED].join(","));
         let detail = findings(&json)[0].detail.clone().unwrap();
         assert_eq!(
             detail.to_lowercase().matches("expired").count(),
@@ -254,12 +208,12 @@ mod tests {
         );
 
         // Expiré et rien d'autre : la mention de « Valid to » reste.
-        let json = report(&[ISSUER, VALID_TO_EXPIRED].join(","), "");
+        let json = report(&[ISSUER, VALID_TO_EXPIRED].join(","));
         let detail = findings(&json)[0].detail.clone().unwrap();
         assert!(detail.contains("EXPIRED 3 day(s) ago"), "{detail}");
 
         // Une erreur de connexion à côté d'une expiration : l'expiration reste seule.
-        let json = report(&[ISSUER, VALID_TO_EXPIRED, CONNECT_FAILURE].join(","), "");
+        let json = report(&[ISSUER, VALID_TO_EXPIRED, CONNECT_FAILURE].join(","));
         let f = findings(&json);
         assert_eq!(f.len(), 1);
         assert!(
@@ -269,47 +223,6 @@ mod tests {
                 .unwrap()
                 .contains("Unable to connect")
         );
-    }
-
-    #[test]
-    fn security_detail_is_none_when_no_recommendation_is_given() {
-        let blank = CSP_WARNING.replace(
-            "Content-Security-Policy is set but weakened by 'unsafe-inline'.",
-            "",
-        );
-        let f = findings(&report("", &blank));
-        assert_eq!(f.len(), 1);
-        assert_eq!(f[0].code, FindingCode::SecurityHeadersMissing);
-        assert_eq!(f[0].detail, None);
-
-        let f = findings(&report("", CSP_WARNING));
-        assert!(f[0].detail.is_some());
-    }
-
-    #[test]
-    fn security_warnings_give_one_site_finding() {
-        let rows = [CSP_WARNING, HSTS_CRITICAL, SERVER_NOTICE, NOSNIFF_OK].join(",");
-        let f = findings(&report("", &rows));
-        assert_eq!(f.len(), 1);
-        assert_eq!(f[0].code, FindingCode::SecurityHeadersMissing);
-        assert_eq!(f[0].url, START);
-        assert_eq!(
-            f[0].related,
-            ["Content-Security-Policy", "Strict-Transport-Security"]
-        );
-        let detail = f[0].detail.as_deref().unwrap();
-        assert!(detail.contains("weakened by 'unsafe-inline'"), "{detail}");
-        assert!(
-            detail.contains("Strict-Transport-Security is not set"),
-            "{detail}"
-        );
-        assert!(!detail.contains("railway-hikari"), "{detail}");
-    }
-
-    #[test]
-    fn notices_and_ok_headers_give_no_finding() {
-        let rows = [SERVER_NOTICE, NOSNIFF_OK].join(",");
-        assert!(findings(&report("", &rows)).is_empty());
     }
 
     #[test]

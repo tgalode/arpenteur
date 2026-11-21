@@ -77,6 +77,48 @@ pub fn is_indexable(page: &PageRecord) -> bool {
     }
 }
 
+pub const SECURITY_HEADERS: [&str; 5] = [
+    "Strict-Transport-Security",
+    "Content-Security-Policy",
+    "X-Frame-Options",
+    "X-Content-Type-Options",
+    "Referrer-Policy",
+];
+
+/// La ligne de l'URL de départ si elle est HTML en 200, sinon la première page HTML interne en 200.
+pub fn reference_page<'a>(pages: &'a [PageRecord], start_url: &str) -> Option<&'a PageRecord> {
+    let start_key = norm(start_url);
+    let usable = |p: &&PageRecord| is_html_200(p);
+    pages
+        .iter()
+        .filter(usable)
+        .find(|p| norm(&p.url) == start_key)
+        .or_else(|| {
+            let start = Url::parse(&start_key).ok()?;
+            pages
+                .iter()
+                .filter(usable)
+                .find(|p| Url::parse(&p.url).is_ok_and(|u| is_same_site(&start, &u)))
+        })
+}
+
+fn missing_security_headers(page: &PageRecord) -> Vec<&'static str> {
+    let has = |name: &str| page.headers.contains_key(&name.to_ascii_lowercase());
+    let frame_ancestors = page
+        .headers
+        .get("content-security-policy")
+        .is_some_and(|v| v.to_ascii_lowercase().contains("frame-ancestors"));
+    let https = Url::parse(&page.url).is_ok_and(|u| u.scheme() == "https");
+    SECURITY_HEADERS
+        .into_iter()
+        .filter(|&name| match name {
+            "Strict-Transport-Security" => https && !has(name),
+            "X-Frame-Options" => !has(name) && !frame_ancestors,
+            _ => !has(name),
+        })
+        .collect()
+}
+
 pub struct CheckInput<'a> {
     pub pages: &'a [PageRecord],
     pub links: &'a LinkReport,
@@ -379,6 +421,18 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
             vec![],
             (!encoding.is_empty()).then(|| encoding.to_string()),
         );
+    }
+
+    if let Some(page) = reference_page(pages, start_url) {
+        let missing = missing_security_headers(page);
+        if !missing.is_empty() {
+            push(
+                FindingCode::SecurityHeadersMissing,
+                start_url,
+                missing.iter().map(|h| h.to_string()).collect(),
+                Some(format!("Absents : {}.", missing.join(", "))),
+            );
+        }
     }
 
     out.sort_by_cached_key(|f| (f.code.clone() as usize, f.url.clone()));
@@ -1402,6 +1456,113 @@ mod tests {
                 "{enc:?}"
             );
         }
+    }
+
+    const ALL_HEADERS: [(&str, &str); 5] = [
+        ("strict-transport-security", "max-age=31536000"),
+        ("content-security-policy", "default-src 'self'"),
+        ("x-frame-options", "DENY"),
+        ("x-content-type-options", "nosniff"),
+        ("referrer-policy", "no-referrer"),
+    ];
+
+    fn with_headers(path: &str, skip: &[&str]) -> PageRecord {
+        let mut page = html(path);
+        for (k, v) in ALL_HEADERS.iter().filter(|(k, _)| !skip.contains(k)) {
+            page = page.header(k, v);
+        }
+        page.rec()
+    }
+
+    fn security_of(pages: &[PageRecord], start: &str) -> Vec<Finding> {
+        let f = check_from(pages, &no_sitemap(), start);
+        of(&f, FindingCode::SecurityHeadersMissing)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn all_security_headers_present_gives_no_finding() {
+        let pages = vec![with_headers("/", &[])];
+        assert!(security_of(&pages, START).is_empty());
+    }
+
+    #[test]
+    fn missing_headers_are_listed_in_order() {
+        let pages = vec![with_headers(
+            "/",
+            &["content-security-policy", "referrer-policy"],
+        )];
+        let found = security_of(&pages, START);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].url, START);
+        assert_eq!(
+            found[0].related,
+            ["Content-Security-Policy", "Referrer-Policy"]
+        );
+        assert_eq!(
+            found[0].detail.as_deref(),
+            Some("Absents : Content-Security-Policy, Referrer-Policy.")
+        );
+    }
+
+    #[test]
+    fn csp_frame_ancestors_counts_as_x_frame_options() {
+        let page = |csp: &str| {
+            let mut p = with_headers("/", &["x-frame-options", "content-security-policy"]);
+            p.headers
+                .insert("content-security-policy".into(), csp.into());
+            p
+        };
+        let found = security_of(&[page("default-src 'self'; Frame-Ancestors 'none'")], START);
+        assert!(found.is_empty(), "{found:?}");
+
+        let found = security_of(&[page("default-src 'self'")], START);
+        assert_eq!(found[0].related, ["X-Frame-Options"]);
+    }
+
+    #[test]
+    fn hsts_is_not_expected_on_http() {
+        let start = "http://x.fr/";
+        let mut page = with_headers(
+            "/",
+            &["strict-transport-security", "x-content-type-options"],
+        );
+        page.url = start.to_string();
+        let found = security_of(&[page.clone()], start);
+        assert_eq!(found[0].related, ["X-Content-Type-Options"]);
+
+        let found = security_of(&[with_headers("/", &["strict-transport-security"])], START);
+        assert_eq!(found[0].related, ["Strict-Transport-Security"]);
+    }
+
+    #[test]
+    fn security_headers_use_reference_page() {
+        let pages = vec![
+            redirect("/", 301, "/accueil"),
+            with_headers("/accueil", &["x-content-type-options"]),
+            html("/autre").rec(),
+        ];
+        let found = security_of(&pages, START);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].url, START);
+        assert_eq!(found[0].related, ["X-Content-Type-Options"]);
+
+        let pages = vec![
+            redirect("/", 301, "/accueil"),
+            other("/accueil", 404, "html"),
+        ];
+        assert!(security_of(&pages, START).is_empty());
+    }
+
+    #[test]
+    fn header_names_are_case_insensitive() {
+        for name in SECURITY_HEADERS {
+            assert_ne!(name.to_ascii_lowercase(), name);
+        }
+        let pages = vec![with_headers("/", &[])];
+        assert!(security_of(&pages, START).is_empty());
     }
 
     #[test]
