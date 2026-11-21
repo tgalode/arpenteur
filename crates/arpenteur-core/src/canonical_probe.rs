@@ -4,16 +4,26 @@
 use std::collections::{BTreeMap, HashSet};
 use std::time::{Duration, Instant};
 
-use reqwest::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
+use reqwest::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::checks::reference_page;
 use crate::model::PageRecord;
+use crate::settings::UrlFilter;
 use crate::urls::{is_same_site, normalize_url};
 
 /// Délai de SiteOne pour ses propres requêtes.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Ce que les sondes partagent : client, site, règles de filtrage, débit et annulation.
+pub struct ProbeEnv<'a> {
+    pub client: &'a reqwest::Client,
+    pub start: &'a Url,
+    pub filter: &'a UrlFilter,
+    pub min_interval: Duration,
+    pub cancel: &'a CancellationToken,
+}
 
 pub struct PostCrawl {
     pub content_encoding: Option<String>,
@@ -70,7 +80,7 @@ pub async fn probe_content_encoding(
     Some(value.trim().to_string())
 }
 
-fn probe_targets(pages: &[PageRecord], start: &Url) -> Vec<Url> {
+fn probe_targets(pages: &[PageRecord], start: &Url, filter: &UrlFilter) -> Vec<Url> {
     let crawled: HashSet<String> = pages
         .iter()
         .map(|p| normalize_url(&p.url).unwrap_or_else(|| p.url.clone()))
@@ -91,12 +101,31 @@ fn probe_targets(pages: &[PageRecord], start: &Url) -> Vec<Url> {
         if web
             && is_same_site(start, &url)
             && !crawled.contains(&normalized)
+            && filter.check(&normalized).is_ok()
             && seen.insert(normalized)
         {
             targets.push(url);
         }
     }
     targets
+}
+
+/// Type d'une réponse, avec le vocabulaire des pages crawlées. La correspondance de
+/// SiteOne (`get_content_type_id_by_header`) est privée : on en reprend les cas utiles.
+fn content_type_name(status: i32, header: Option<&str>) -> &'static str {
+    if (300..400).contains(&status) {
+        return "redirect";
+    }
+    let header = header.unwrap_or("").to_lowercase();
+    if header.contains("text/html") {
+        "html"
+    } else if header.contains("image/") {
+        "image"
+    } else if header.contains("application/pdf") {
+        "document"
+    } else {
+        "other"
+    }
 }
 
 /// `None` sur une erreur réseau (délai dépassé compris) : une requête ratée ne prouve rien
@@ -111,11 +140,13 @@ async fn probe_one(client: &reqwest::Client, url: &Url) -> Option<PageRecord> {
         .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
         .collect();
     let status = i32::from(response.status().as_u16());
-    let content_type = if (300..400).contains(&status) {
-        "redirect"
-    } else {
-        "html"
-    };
+    let content_type = content_type_name(
+        status,
+        response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+    );
     Some(PageRecord {
         url: url.to_string(),
         status,
@@ -124,59 +155,60 @@ async fn probe_one(client: &reqwest::Client, url: &Url) -> Option<PageRecord> {
         elapsed_ms,
         headers,
         facts: None,
+        probed: true,
     })
 }
 
-/// Interroge les cibles de canonical internes que le crawl n'a pas demandées,
-/// au plus `budget` requêtes, espacées de `min_interval`.
+/// Interroge les cibles de canonical internes que le crawl n'a pas demandées et que le
+/// filtre autorise, au plus `budget` requêtes, espacées de `env.min_interval`.
+/// Renvoie les lignes ajoutées et le nombre de requêtes faites.
 pub async fn probe_canonical_targets(
-    client: &reqwest::Client,
+    env: &ProbeEnv<'_>,
     pages: &[PageRecord],
-    start: &Url,
     budget: usize,
-    min_interval: Duration,
-    cancel: &CancellationToken,
-) -> Vec<PageRecord> {
+) -> (Vec<PageRecord>, usize) {
     let mut added = Vec::new();
-    for url in probe_targets(pages, start).into_iter().take(budget) {
+    let mut requests = 0;
+    for url in probe_targets(pages, env.start, env.filter)
+        .into_iter()
+        .take(budget)
+    {
         tokio::select! {
-            _ = tokio::time::sleep(min_interval) => {}
-            _ = cancel.cancelled() => break,
+            _ = tokio::time::sleep(env.min_interval) => {}
+            _ = env.cancel.cancelled() => break,
         }
+        requests += 1;
         let record = tokio::select! {
-            r = probe_one(client, &url) => r,
-            _ = cancel.cancelled() => break,
+            r = probe_one(env.client, &url) => r,
+            _ = env.cancel.cancelled() => break,
         };
         added.extend(record);
     }
-    added
+    (added, requests)
 }
 
 /// Compression d'abord (un constat de site), puis cibles de canonical, dans le
 /// budget restant `max_requests - pages crawlées`.
 pub async fn run_post_crawl_probes(
-    client: &reqwest::Client,
+    env: &ProbeEnv<'_>,
     pages: &[PageRecord],
-    start: &Url,
     max_requests: usize,
-    min_interval: Duration,
-    cancel: &CancellationToken,
 ) -> PostCrawl {
     let mut budget = max_requests.saturating_sub(pages.len());
     let mut content_encoding = None;
-    if budget > 0 && !cancel.is_cancelled() {
-        let sample = reference_page(pages, start.as_str());
+    if budget > 0 && !env.cancel.is_cancelled() {
+        let sample = reference_page(pages, env.start.as_str());
         if let Some(url) = sample.and_then(|p| Url::parse(&p.url).ok()) {
             budget -= 1;
             tokio::select! {
-                _ = tokio::time::sleep(min_interval) => {
-                    content_encoding = probe_content_encoding(client, &url, cancel).await;
+                _ = tokio::time::sleep(env.min_interval) => {
+                    content_encoding = probe_content_encoding(env.client, &url, env.cancel).await;
                 }
-                _ = cancel.cancelled() => {}
+                _ = env.cancel.cancelled() => {}
             }
         }
     }
-    let pages = probe_canonical_targets(client, pages, start, budget, min_interval, cancel).await;
+    let (pages, _) = probe_canonical_targets(env, pages, budget).await;
     PostCrawl {
         content_encoding,
         pages,

@@ -17,7 +17,7 @@ function row(url: string): UrlRow {
     h1: null,
     h1Count: 0,
     canonical: null,
-    indexable: true,
+    indexable: "yes",
     depth: 0,
     inlinks: 0,
     wordCount: 10,
@@ -26,7 +26,7 @@ function row(url: string): UrlRow {
 }
 
 function page(url: string): PageRecord {
-  return { url, status: 200, contentType: "html", size: 10, elapsedMs: 5, headers: {}, facts: null };
+  return { url, status: 200, contentType: "html", size: 10, elapsedMs: 5, headers: {}, facts: null, probed: false };
 }
 
 function finding(over: Partial<Finding> & Pick<Finding, "code" | "url">): Finding {

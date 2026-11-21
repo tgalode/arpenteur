@@ -1,5 +1,5 @@
 import { t } from "../i18n/fr";
-import type { CrawlStatus, UrlRow } from "./types";
+import type { CrawlStatus, Indexability, UrlRow } from "./types";
 
 // Statuts négatifs de SiteOne (result/visited_url.rs) : aucune réponse HTTP.
 const ERROR_CONNECTION_FAIL = -1;
@@ -21,14 +21,24 @@ export function statusText(status: number): string {
   }
 }
 
+export function indexableText(i: Indexability): string {
+  if (i === "yes") return t("yes");
+  return i === "no" ? t("no") : t("notAnalyzed");
+}
+
+export function indexableTone(i: Indexability): string {
+  if (i === "yes") return "tone-ok";
+  return i === "no" ? "tone-err" : "dim";
+}
+
+const INDEXABLE_ORDER: Record<Indexability, number> = { yes: 0, no: 1, notAnalyzed: 2 };
+
 export type StatusClass = "all" | "2xx" | "3xx" | "4xx" | "5xx" | "error";
 
-function compare(a: string | number | boolean, b: string | number | boolean): number {
+function compare(a: string | number, b: string | number, key?: keyof UrlRow): number {
+  if (key === "indexable") return INDEXABLE_ORDER[a as Indexability] - INDEXABLE_ORDER[b as Indexability];
   if (typeof a === "string" && typeof b === "string") {
     return a.localeCompare(b, "fr", { sensitivity: "base" });
-  }
-  if (typeof a === "boolean" && typeof b === "boolean") {
-    return Number(a) - Number(b);
   }
   return (a as number) - (b as number);
 }
@@ -43,7 +53,7 @@ export function sortRows(rows: UrlRow[], key: keyof UrlRow, dir: "asc" | "desc")
     if (aNull && bNull) return 0;
     if (aNull) return 1;
     if (bNull) return -1;
-    return sign * compare(a, b);
+    return sign * compare(a, b, key);
   });
 }
 

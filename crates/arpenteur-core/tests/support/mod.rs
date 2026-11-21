@@ -26,6 +26,12 @@ pub enum Variant {
     BrotliOnProbe,
     /// Comme `CanonicalOrphanTarget`, mais `/canon-target` accepte la connexion et ne répond jamais.
     CanonicalTargetHangs,
+    /// `/x` a un canonical vers `/prive/cible`, que robots.txt interdit.
+    CanonicalToDisallowed,
+    /// `/x` a un canonical vers `/tag/cible`, qui répond 200 (à exclure par un motif).
+    CanonicalToTag,
+    /// `/x` a un canonical vers `/canon-target`, qui répond 200 en `application/pdf`.
+    CanonicalToPdf,
 }
 
 /// `Accept-Encoding` envoyé par la sonde de compression.
@@ -143,6 +149,34 @@ async fn handle(State(st): State<AppState>, headers: HeaderMap, uri: Uri) -> Res
             "br",
         )
             .into_response();
+    }
+    if matches!(
+        st.variant,
+        Variant::CanonicalToDisallowed | Variant::CanonicalToTag | Variant::CanonicalToPdf
+    ) {
+        let target = match st.variant {
+            Variant::CanonicalToDisallowed => "/prive/cible",
+            Variant::CanonicalToTag => "/tag/cible",
+            _ => "/canon-target",
+        };
+        return match path.as_str() {
+            "/robots.txt" => text(
+                "text/plain",
+                "User-agent: *\nDisallow: /prive\n".to_string(),
+            ),
+            "/" => html(
+                r#"<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Accueil</title></head><body><h1>Accueil</h1><a href="/x">x</a></body></html>"#
+                    .to_string(),
+            ),
+            "/x" => html(format!(
+                r#"<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>X</title><link rel="canonical" href="{base}{target}"></head><body><h1>X</h1></body></html>"#
+            )),
+            p if p == target && st.variant == Variant::CanonicalToPdf => {
+                ([(header::CONTENT_TYPE, "application/pdf")], "%PDF-1.4").into_response()
+            }
+            p if p == target => html("<!doctype html><title>Cible</title>".to_string()),
+            _ => StatusCode::NOT_FOUND.into_response(),
+        };
     }
     if matches!(
         st.variant,

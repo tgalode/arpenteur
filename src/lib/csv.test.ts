@@ -13,7 +13,7 @@ function row(over: Partial<UrlRow> = {}): UrlRow {
     h1: "Bienvenue",
     h1Count: 1,
     canonical: null,
-    indexable: true,
+    indexable: "yes",
     depth: 0,
     inlinks: 3,
     wordCount: 120,
@@ -34,6 +34,16 @@ test("séparateur point-virgule, BOM et CRLF", () => {
   expect(lines[1]).toBe("https://exemple.fr/;200;text/html;Accueil;Bienvenue;oui;0;3;120");
   expect(lines).toHaveLength(3);
   expect(csv.replace(/\r\n/g, "")).not.toMatch(/[\r\n]/);
+});
+
+test("le CSV écrit oui, non ou non analysé", () => {
+  const csv = urlsCsv([
+    row({ indexable: "yes" }),
+    row({ indexable: "no" }),
+    row({ indexable: "notAnalyzed" }),
+  ]);
+  const lines = csv.slice(1).split("\r\n");
+  expect(lines.slice(1, 4).map((l) => l.split(";")[5])).toEqual(["oui", "non", "non analysé"]);
 });
 
 test("les champs avec ; \" ou retour à la ligne sont échappés", () => {

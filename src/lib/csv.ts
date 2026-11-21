@@ -1,7 +1,7 @@
 import { t } from "../i18n/fr";
 import { CATALOG, findingTitle, LEVELS } from "./catalog";
 import codes from "./finding-codes.json";
-import { statusText } from "./table";
+import { indexableText, statusText } from "./table";
 import type { Finding, UrlRow } from "./types";
 
 // Excel en français : séparateur « ; », UTF-8 avec BOM, fins de ligne CRLF.
@@ -45,7 +45,7 @@ export function urlsCsv(rows: UrlRow[]): string {
       r.contentType,
       r.title,
       r.h1,
-      r.indexable ? t("yes") : t("no"),
+      indexableText(r.indexable),
       r.depth,
       r.inlinks,
       r.wordCount,

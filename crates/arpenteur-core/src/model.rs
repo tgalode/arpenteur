@@ -60,6 +60,9 @@ pub struct PageRecord {
     pub elapsed_ms: u64,
     pub headers: BTreeMap<String, String>,
     pub facts: Option<PageFacts>,
+    /// Ligne ajoutée par une sonde après le crawl : jamais analysée.
+    #[serde(default)]
+    pub probed: bool,
 }
 
 impl PageRecord {
@@ -200,6 +203,14 @@ pub struct Finding {
     pub detail: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Indexability {
+    Yes,
+    No,
+    NotAnalyzed,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct UrlRow {
@@ -211,7 +222,7 @@ pub struct UrlRow {
     pub h1: Option<String>,
     pub h1_count: u32,
     pub canonical: Option<String>,
-    pub indexable: bool,
+    pub indexable: Indexability,
     pub depth: Option<u32>,
     pub inlinks: u32,
     pub word_count: Option<u32>,

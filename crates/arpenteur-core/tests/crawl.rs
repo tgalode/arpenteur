@@ -4,11 +4,15 @@ use std::time::{Duration, Instant};
 
 use std::sync::Arc;
 
+use arpenteur_core::canonical_probe::{
+    PostCrawl, ProbeEnv, probe_canonical_targets, run_post_crawl_probes,
+};
 use arpenteur_core::collector::CrawlEvents;
 use arpenteur_core::engine::run_crawl;
 use arpenteur_core::model::{
-    CrawlMeta, CrawlResult, CrawlSettings, CrawlStatus, FindingCode, Progress, UrlRow,
+    CrawlMeta, CrawlResult, CrawlSettings, CrawlStatus, FindingCode, Indexability, Progress, UrlRow,
 };
+use arpenteur_core::settings::UrlFilter;
 use arpenteur_core::sitemap::{discover, discover_with_limit};
 use arpenteur_core::storage::CrawlStore;
 use support::{Variant, start_fixture_site};
@@ -353,6 +357,7 @@ fn fixture_page(
         size: None,
         elapsed_ms: 0,
         headers: Default::default(),
+        probed: false,
         facts: Some(PageFacts {
             title: None,
             meta_description: None,
@@ -373,6 +378,43 @@ fn fixture_page(
 
 fn probe_client() -> reqwest::Client {
     arpenteur_core::canonical_probe::probe_client("Arpenteur-test").unwrap()
+}
+
+async fn probe_targets_with(
+    client: &reqwest::Client,
+    start: &Url,
+    pages: &[arpenteur_core::model::PageRecord],
+    budget: usize,
+    cancel: &CancellationToken,
+) -> Vec<arpenteur_core::model::PageRecord> {
+    let filter = UrlFilter::new(&CrawlSettings::default(), None);
+    let env = ProbeEnv {
+        client,
+        start,
+        filter: &filter,
+        min_interval: Duration::ZERO,
+        cancel,
+    };
+    probe_canonical_targets(&env, pages, budget).await.0
+}
+
+async fn post_probes(
+    client: &reqwest::Client,
+    start: &Url,
+    pages: &[arpenteur_core::model::PageRecord],
+    max_requests: usize,
+    min_interval: Duration,
+    cancel: &CancellationToken,
+) -> PostCrawl {
+    let filter = UrlFilter::new(&CrawlSettings::default(), None);
+    let env = ProbeEnv {
+        client,
+        start,
+        filter: &filter,
+        min_interval,
+        cancel,
+    };
+    run_post_crawl_probes(&env, pages, max_requests).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -407,40 +449,16 @@ async fn probe_respects_budget_and_cancel() {
         Some(&format!("{}/canon-target", site.base)),
     )];
     let live = CancellationToken::new();
-    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
-        &probe_client(),
-        &pages,
-        &start,
-        0,
-        Duration::ZERO,
-        &live,
-    )
-    .await;
+    let added = probe_targets_with(&probe_client(), &start, &pages, 0, &live).await;
     assert!(added.is_empty());
 
     let cancelled = CancellationToken::new();
     cancelled.cancel();
-    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
-        &probe_client(),
-        &pages,
-        &start,
-        10,
-        Duration::ZERO,
-        &cancelled,
-    )
-    .await;
+    let added = probe_targets_with(&probe_client(), &start, &pages, 10, &cancelled).await;
     assert!(added.is_empty());
     assert_eq!(site.count("/canon-target"), 0);
 
-    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
-        &probe_client(),
-        &pages,
-        &start,
-        10,
-        Duration::ZERO,
-        &live,
-    )
-    .await;
+    let added = probe_targets_with(&probe_client(), &start, &pages, 10, &live).await;
     assert_eq!(added.len(), 1);
     assert_eq!(site.count("/canon-target"), 1);
 }
@@ -456,12 +474,11 @@ async fn external_canonical_is_not_probed() {
         200,
         Some(&format!("{external}/canon-target")),
     )];
-    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
+    let added = probe_targets_with(
         &probe_client(),
-        &pages,
         &start,
+        &pages,
         10,
-        Duration::ZERO,
         &CancellationToken::new(),
     )
     .await;
@@ -487,12 +504,11 @@ async fn crawled_or_duplicate_canonical_targets_are_probed_once_or_never() {
             Some(&format!("{}/x", site.base)),
         ),
     ];
-    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
+    let added = probe_targets_with(
         &probe_client(),
-        &pages,
         &start,
+        &pages,
         10,
-        Duration::ZERO,
         &CancellationToken::new(),
     )
     .await;
@@ -571,10 +587,10 @@ async fn post_crawl_probes_share_one_budget() {
     let run = |max: usize, cancel: CancellationToken| {
         let (pages, start) = (pages.clone(), start.clone());
         async move {
-            arpenteur_core::canonical_probe::run_post_crawl_probes(
+            post_probes(
                 &probe_client(),
-                &pages,
                 &start,
+                &pages,
                 max,
                 Duration::ZERO,
                 &cancel,
@@ -609,10 +625,10 @@ async fn sampled_encoding(
     pages: Vec<arpenteur_core::model::PageRecord>,
 ) -> Option<String> {
     let start = Url::parse(&format!("{}/", site.base)).unwrap();
-    arpenteur_core::canonical_probe::run_post_crawl_probes(
+    post_probes(
         &probe_client(),
-        &pages,
         &start,
+        &pages,
         100,
         Duration::ZERO,
         &CancellationToken::new(),
@@ -674,12 +690,11 @@ async fn hanging_canonical_target_times_out_without_record() {
         Some(&format!("{}/canon-target", site.base)),
     )];
     let began = Instant::now();
-    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
+    let added = probe_targets_with(
         &short_timeout_client(),
-        &pages,
         &start,
+        &pages,
         10,
-        Duration::ZERO,
         &CancellationToken::new(),
     )
     .await;
@@ -729,12 +744,11 @@ async fn closed_port_canonical_target_leaves_no_record() {
         200,
         Some(&format!("http://127.0.0.1:{closed}/ailleurs")),
     )];
-    let added = arpenteur_core::canonical_probe::probe_canonical_targets(
+    let added = probe_targets_with(
         &probe_client(),
-        &pages,
         &start,
+        &pages,
         10,
-        Duration::ZERO,
         &CancellationToken::new(),
     )
     .await;
@@ -763,17 +777,7 @@ async fn compression_probe_waits_min_interval_and_is_cancel_aware() {
     let pages = vec![fixture_page(&format!("{}/", site.base), 200, None)];
     let run = |interval: Duration, cancel: CancellationToken| {
         let (pages, start) = (pages.clone(), start.clone());
-        async move {
-            arpenteur_core::canonical_probe::run_post_crawl_probes(
-                &probe_client(),
-                &pages,
-                &start,
-                100,
-                interval,
-                &cancel,
-            )
-            .await
-        }
+        async move { post_probes(&probe_client(), &start, &pages, 100, interval, &cancel).await }
     };
 
     let began = Instant::now();
@@ -793,4 +797,71 @@ async fn compression_probe_waits_min_interval_and_is_cancel_aware() {
     assert!(began.elapsed() < Duration::from_secs(5));
     assert!(r.content_encoding.is_none());
     assert_eq!(site.requests.lock().unwrap().len(), before);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn disallowed_canonical_target_is_not_probed() {
+    let (site, store, loc, meta, _root) =
+        run(Variant::CanonicalToDisallowed, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    assert!(!site.requested("/prive/cible"));
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    assert!(has(&r, FindingCode::CanonicalToOtherUrl, "/x"));
+    assert!(r.pages.iter().all(|p| !p.probed));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pattern_excluded_canonical_target_is_not_probed() {
+    let settings = CrawlSettings {
+        ignore_regex: vec!["/tag/".to_string()],
+        ..fast_settings()
+    };
+    let (site, store, loc, _meta, _root) =
+        run_with(Variant::CanonicalToTag, settings, |_| Arc::new(NoEvents)).await;
+    assert!(!site.requested("/tag/cible"));
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    assert!(has(&r, FindingCode::CanonicalToOtherUrl, "/x"));
+
+    // Sans le motif, la même cible est sondée.
+    let (site, _store, _loc, _meta, _root) =
+        run(Variant::CanonicalToTag, |_| Arc::new(NoEvents)).await;
+    assert_eq!(site.count("/tag/cible"), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn probed_row_is_marked_and_typed() {
+    let (site, store, loc, _meta, _root) =
+        run(Variant::CanonicalToPdf, |_| Arc::new(NoEvents)).await;
+    assert_eq!(site.count("/canon-target"), 1);
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    let target = r
+        .pages
+        .iter()
+        .find(|p| path_of(&p.url) == "/canon-target")
+        .unwrap();
+    assert!(target.probed);
+    assert_eq!(target.status, 200);
+    assert_eq!(target.content_type, "document");
+    assert_eq!(
+        row(&r, "/canon-target").indexable,
+        Indexability::NotAnalyzed
+    );
+    assert_eq!(row(&r, "/x").indexable, Indexability::No);
+    assert_eq!(row(&r, "/").indexable, Indexability::Yes);
+    assert!(
+        !r.findings
+            .iter()
+            .any(|f| f.code == FindingCode::SitemapUrlNonIndexable)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn probed_rows_are_not_counted_in_meta_pages() {
+    let (_site, store, loc, meta, _root) =
+        run(Variant::CanonicalToPdf, |_| Arc::new(NoEvents)).await;
+    let (m, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    let probed = data.pages.iter().filter(|p| p.probed).count();
+    assert_eq!(probed, 1);
+    assert_eq!(meta.pages as usize, data.pages.len() - probed);
+    assert_eq!(m.pages, meta.pages);
 }

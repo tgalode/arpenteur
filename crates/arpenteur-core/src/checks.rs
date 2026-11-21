@@ -6,7 +6,7 @@ use url::Url;
 use crate::links::analyze_links;
 use crate::model::{
     CollectedData, CrawlMeta, CrawlResult, CrawlStatus, FACTS_VERSION, Finding, FindingCode,
-    LinkReport, PageFacts, PageRecord, SitemapResult, UrlRow,
+    Indexability, LinkReport, PageFacts, PageRecord, SitemapResult, UrlRow,
 };
 use crate::siteone::{SiteOneSummary, site_findings};
 use crate::urls::{is_same_site, normalize_url};
@@ -62,6 +62,16 @@ fn is_noindex(page: &PageRecord) -> bool {
         .and_then(|f| f.meta_robots.as_deref())
         .is_some_and(has_noindex_token);
     meta || page.x_robots_tag().is_some_and(has_noindex_token)
+}
+
+pub fn indexability(page: &PageRecord) -> Indexability {
+    if page.probed {
+        Indexability::NotAnalyzed
+    } else if is_indexable(page) {
+        Indexability::Yes
+    } else {
+        Indexability::No
+    }
 }
 
 pub fn is_indexable(page: &PageRecord) -> bool {
@@ -338,7 +348,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
             }
             if is_error(page, throttled) {
                 push(FindingCode::SitemapUrlError, &page.url, vec![], None);
-            } else if is_html_200(page) && !is_indexable(page) {
+            } else if !page.probed && is_html_200(page) && !is_indexable(page) {
                 push(FindingCode::SitemapUrlNonIndexable, &page.url, vec![], None);
             }
         }
@@ -477,7 +487,7 @@ pub fn build_rows(pages: &[PageRecord], links: &LinkReport) -> Vec<UrlRow> {
                 h1: facts.and_then(|f| f.h1.first().cloned()),
                 h1_count: facts.map_or(0, |f| f.h1.len() as u32),
                 canonical: facts.and_then(|f| f.canonical.clone()),
-                indexable: is_indexable(p),
+                indexable: indexability(p),
                 depth: links.depth.get(&key).copied(),
                 inlinks: links.inlinks.get(&key).map_or(0, |v| v.len() as u32),
                 word_count: facts.map(|f| f.word_count),
@@ -559,6 +569,7 @@ mod tests {
                 headings: Vec::new(),
                 unlinked_phones: Vec::new(),
             }),
+            probed: false,
         })
     }
 
@@ -571,6 +582,7 @@ mod tests {
             elapsed_ms: 0,
             headers: BTreeMap::new(),
             facts: None,
+            probed: false,
         }
     }
 
@@ -1014,6 +1026,30 @@ mod tests {
     }
 
     #[test]
+    fn probed_page_is_not_analyzed_and_not_a_sitemap_finding() {
+        let mut probed = html("/p").rec();
+        probed.probed = true;
+        probed.facts = None;
+        assert_eq!(indexability(&probed), Indexability::NotAnalyzed);
+        assert!(!is_indexable(&probed));
+        assert_eq!(indexability(&html("/a").rec()), Indexability::Yes);
+        assert_eq!(
+            indexability(&html("/a").robots("noindex").rec()),
+            Indexability::No
+        );
+
+        let sm = sitemap(&["/", "/p", "/q"]);
+        let mut unprobed = probed.clone();
+        unprobed.url = full("/q");
+        unprobed.probed = false;
+        let f = check(&[html("/").rec(), probed, unprobed], &sm);
+        assert_eq!(
+            urls_of(&f, FindingCode::SitemapUrlNonIndexable),
+            [full("/q")]
+        );
+    }
+
+    #[test]
     fn is_indexable_rules() {
         assert!(is_indexable(&html("/a").rec()));
         assert!(!is_indexable(&html("/a").robots("noindex").rec()));
@@ -1041,13 +1077,13 @@ mod tests {
         assert_eq!(rows[0].inlinks, 0);
         assert_eq!(rows[0].h1.as_deref(), Some("h"));
         assert_eq!(rows[0].h1_count, 1);
-        assert!(rows[0].indexable);
+        assert_eq!(rows[0].indexable, Indexability::Yes);
         assert_eq!(rows[1].depth, Some(1));
         assert_eq!(rows[1].inlinks, 1);
         assert_eq!(rows[1].word_count, Some(300));
         assert_eq!(rows[2].word_count, None);
         assert_eq!(rows[2].depth, None);
-        assert!(!rows[2].indexable);
+        assert_eq!(rows[2].indexable, Indexability::No);
     }
 
     #[test]

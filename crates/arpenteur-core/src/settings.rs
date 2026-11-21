@@ -6,6 +6,7 @@ use std::fmt;
 use std::path::Path;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use siteone_crawler::engine::parsed_url::ParsedUrl;
 use siteone_crawler::engine::robots_txt::RobotsTxt;
 use siteone_crawler::options::core_options::{CoreOptions, parse_argv};
@@ -125,31 +126,64 @@ fn compile_patterns<'a>(patterns: impl Iterator<Item = &'a str>) -> Vec<Regex> {
         .collect()
 }
 
+/// Raison pour laquelle une URL n'est pas demandée.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SkipReason {
+    Robots,
+    Pattern,
+}
+
+/// Les règles de SiteOne pour un lien (motifs à inclure et à ignorer, robots.txt),
+/// réutilisables hors du crawl. Les motifs sont testés avant robots.txt.
+pub struct UrlFilter {
+    include: Vec<Regex>,
+    ignore: Vec<Regex>,
+    robots: Option<RobotsTxt>,
+}
+
+impl UrlFilter {
+    /// `robots_txt` est ignoré si `settings.respect_robots` est faux.
+    pub fn new(settings: &CrawlSettings, robots_txt: Option<&str>) -> UrlFilter {
+        UrlFilter {
+            include: compile_patterns(settings.include_regex.iter().map(String::as_str)),
+            ignore: compile_patterns(
+                std::iter::once(ASSET_IGNORE_REGEX)
+                    .chain(settings.ignore_regex.iter().map(String::as_str)),
+            ),
+            robots: robots_txt
+                .filter(|_| settings.respect_robots)
+                .map(RobotsTxt::parse),
+        }
+    }
+
+    pub fn check(&self, url: &str) -> Result<(), SkipReason> {
+        let parsed = ParsedUrl::parse(url, None);
+        let full = parsed.get_full_url(true, false);
+        let included = self.include.is_empty() || self.include.iter().any(|re| re.is_match(&full));
+        if !included || self.ignore.iter().any(|re| re.is_match(&full)) {
+            return Err(SkipReason::Pattern);
+        }
+        // SiteOne ne consulte pas robots.txt pour les fichiers statiques.
+        let allowed =
+            parsed.is_static_file() || self.robots.as_ref().is_none_or(|r| r.is_allowed(url));
+        if allowed {
+            Ok(())
+        } else {
+            Err(SkipReason::Robots)
+        }
+    }
+}
+
 /// URL du sitemap à donner à SiteOne en graines. SiteOne n'applique ni robots.txt
 /// ni `--include-regex` / `--ignore-regex` aux URL de `--url-list`
 /// (`add_url_to_queue_static`) : on les applique ici, avec ses règles pour un lien.
 pub(crate) fn crawl_seeds(settings: &CrawlSettings, sitemap: &SitemapResult) -> Vec<String> {
-    let include = compile_patterns(settings.include_regex.iter().map(String::as_str));
-    let ignore = compile_patterns(
-        std::iter::once(ASSET_IGNORE_REGEX).chain(settings.ignore_regex.iter().map(String::as_str)),
-    );
-    let robots = match (&sitemap.robots_txt, settings.respect_robots) {
-        (Some(body), true) => Some(RobotsTxt::parse(body)),
-        _ => None,
-    };
+    let filter = UrlFilter::new(settings, sitemap.robots_txt.as_deref());
     sitemap
         .urls
         .iter()
-        .filter(|url| {
-            let parsed = ParsedUrl::parse(url, None);
-            let full = parsed.get_full_url(true, false);
-            let included = include.is_empty() || include.iter().any(|re| re.is_match(&full));
-            let ignored = ignore.iter().any(|re| re.is_match(&full));
-            // SiteOne ne consulte pas robots.txt pour les fichiers statiques.
-            let allowed =
-                parsed.is_static_file() || robots.as_ref().is_none_or(|r| r.is_allowed(url));
-            included && !ignored && allowed
-        })
+        .filter(|url| filter.check(url).is_ok())
         .cloned()
         .collect()
 }
@@ -293,6 +327,48 @@ mod tests {
             ..filtered
         };
         assert_eq!(seeds(&no_robots), ["/blog/a", "/private/b"]);
+    }
+
+    #[test]
+    fn url_filter_reports_robots_and_pattern() {
+        let robots = "User-agent: *\nDisallow: /prive\n";
+        let at = |p: &str| format!("https://exemple.fr{p}");
+
+        let filter = UrlFilter::new(&CrawlSettings::default(), Some(robots));
+        assert_eq!(filter.check(&at("/prive/x")), Err(SkipReason::Robots));
+        assert_eq!(filter.check(&at("/public/x")), Ok(()));
+        // Un fichier statique échappe à robots.txt mais pas aux motifs de ressources.
+        assert_eq!(filter.check(&at("/prive/x.pdf")), Err(SkipReason::Pattern));
+
+        let ignoring = CrawlSettings {
+            ignore_regex: vec!["/tag/".to_string()],
+            ..CrawlSettings::default()
+        };
+        let filter = UrlFilter::new(&ignoring, Some(robots));
+        assert_eq!(filter.check(&at("/tag/a")), Err(SkipReason::Pattern));
+        assert_eq!(filter.check(&at("/a")), Ok(()));
+
+        let including = CrawlSettings {
+            include_regex: vec!["/blog/".to_string()],
+            ..CrawlSettings::default()
+        };
+        let filter = UrlFilter::new(&including, Some(robots));
+        assert_eq!(filter.check(&at("/blog/a")), Ok(()));
+        assert_eq!(filter.check(&at("/autre")), Err(SkipReason::Pattern));
+
+        // Les deux motifs et robots.txt : le motif est signalé en premier.
+        assert_eq!(filter.check(&at("/prive/x")), Err(SkipReason::Pattern));
+
+        let lax = CrawlSettings {
+            respect_robots: false,
+            ..CrawlSettings::default()
+        };
+        let filter = UrlFilter::new(&lax, Some(robots));
+        assert_eq!(filter.check(&at("/prive/x")), Ok(()));
+        assert_eq!(
+            UrlFilter::new(&CrawlSettings::default(), None).check(&at("/prive/x")),
+            Ok(())
+        );
     }
 
     #[test]

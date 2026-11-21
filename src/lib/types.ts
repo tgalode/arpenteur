@@ -47,6 +47,7 @@ export interface PageRecord {
   elapsedMs: number;
   headers: Record<string, string>;
   facts: PageFacts | null;
+  probed: boolean;
 }
 
 export interface Link {
@@ -132,6 +133,8 @@ export interface Finding {
   detail: string | null;
 }
 
+export type Indexability = "yes" | "no" | "notAnalyzed";
+
 export interface UrlRow {
   url: string;
   status: number;
@@ -141,7 +144,7 @@ export interface UrlRow {
   h1: string | null;
   h1Count: number;
   canonical: string | null;
-  indexable: boolean;
+  indexable: Indexability;
   depth: number | null;
   inlinks: number;
   wordCount: number | null;

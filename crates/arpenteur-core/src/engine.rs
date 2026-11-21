@@ -73,13 +73,13 @@ use siteone_crawler::engine::manager::Manager;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-use crate::canonical_probe::{probe_client, run_post_crawl_probes};
+use crate::canonical_probe::{ProbeEnv, probe_client, run_post_crawl_probes};
 use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
 use crate::model::{
     CollectedData, CrawlLocation, CrawlMeta, CrawlSettings, CrawlStatus, FACTS_VERSION,
     SitemapResult,
 };
-use crate::settings::{CrawlError, build_core_options, crawl_seeds, plain_user_agent};
+use crate::settings::{CrawlError, UrlFilter, build_core_options, crawl_seeds, plain_user_agent};
 use crate::sitemap::discover;
 use crate::storage::CrawlStore;
 
@@ -228,21 +228,22 @@ pub async fn run_crawl(
         // Après un crawl terminé seulement, au même débit et dans la même limite.
         if let Ok((min_interval, _)) = sitemap_budget(&settings) {
             if let Ok(client) = probe_client(&plain_user_agent(&settings)) {
-                let probed = run_post_crawl_probes(
-                    &client,
-                    &pages,
-                    &start,
-                    settings.max_requests as usize,
+                let filter = UrlFilter::new(&settings, sitemap.robots_txt.as_deref());
+                let env = ProbeEnv {
+                    client: &client,
+                    start: &start,
+                    filter: &filter,
                     min_interval,
-                    &cancel,
-                )
-                .await;
+                    cancel: &cancel,
+                };
+                let probed =
+                    run_post_crawl_probes(&env, &pages, settings.max_requests as usize).await;
                 start_content_encoding = probed.content_encoding;
                 pages.extend(probed.pages);
             }
         }
     }
-    meta.pages = pages.len() as u32;
+    meta.pages = pages.iter().filter(|p| !p.probed).count() as u32;
     meta.status = status;
     meta.finished_at = Some(chrono::Local::now().to_rfc3339());
 

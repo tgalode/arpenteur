@@ -127,6 +127,7 @@ impl Analyzer for PageCollector {
             elapsed_ms: (visited_url.request_time * 1000.0).round() as u64,
             headers,
             facts,
+            probed: false,
         };
 
         let done = {

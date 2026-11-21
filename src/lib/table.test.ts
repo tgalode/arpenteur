@@ -12,7 +12,7 @@ function row(p: Partial<UrlRow>): UrlRow {
     h1: null,
     h1Count: 0,
     canonical: null,
-    indexable: true,
+    indexable: "yes",
     depth: 0,
     inlinks: 0,
     wordCount: null,
@@ -34,9 +34,14 @@ describe("sortRows", () => {
     expect(sortRows(rows, "title", "asc").map((r) => r.title)).toEqual(["eau", "école", "fable"]);
   });
 
-  test("sortRows trie les booléens false avant true", () => {
-    const rows = [row({ indexable: true }), row({ indexable: false })];
-    expect(sortRows(rows, "indexable", "asc").map((r) => r.indexable)).toEqual([false, true]);
+  test("le tri sur indexable range oui, non, non analysé", () => {
+    const rows = [
+      row({ indexable: "notAnalyzed" }),
+      row({ indexable: "yes" }),
+      row({ indexable: "no" }),
+    ];
+    expect(sortRows(rows, "indexable", "asc").map((r) => r.indexable)).toEqual(["yes", "no", "notAnalyzed"]);
+    expect(sortRows(rows, "indexable", "desc").map((r) => r.indexable)).toEqual(["notAnalyzed", "no", "yes"]);
   });
 });
 

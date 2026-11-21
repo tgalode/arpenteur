@@ -52,7 +52,7 @@ function row(url: string, over: Partial<UrlRow> = {}): UrlRow {
     h1: null,
     h1Count: 0,
     canonical: null,
-    indexable: true,
+    indexable: "yes",
     depth: 0,
     inlinks: 0,
     wordCount: 10,
@@ -92,6 +92,7 @@ function result(status: CrawlStatus): CrawlResult {
           headings: [],
           unlinkedPhones: [],
         },
+        probed: false,
       },
     ],
     links: {

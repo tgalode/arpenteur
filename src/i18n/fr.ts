@@ -43,6 +43,7 @@ export const fr = {
   col_words: "mots",
   yes: "oui",
   no: "non",
+  notAnalyzed: "non analysé",
   none: "–",
   noRows: "aucune URL ne correspond.",
   detail_label: "détail de {url}",

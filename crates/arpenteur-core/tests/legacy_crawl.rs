@@ -1,6 +1,6 @@
 use arpenteur_core::checks::assemble;
 use arpenteur_core::model::{
-    CollectedData, CrawlMeta, CrawlSettings, CrawlStatus, FACTS_VERSION, FindingCode,
+    CollectedData, CrawlMeta, CrawlSettings, CrawlStatus, FACTS_VERSION, FindingCode, Indexability,
 };
 
 const PLAN_1_DATA: &str = include_str!("fixtures/arpenteur-plan1.json");
@@ -58,4 +58,38 @@ fn new_crawl_without_lang_reports_it() {
 
     assert!(has(&result.findings, FindingCode::HtmlLangMissing, "/"));
     assert!(has(&result.findings, FindingCode::HtmlLangMissing, "/a"));
+}
+
+#[test]
+fn crawl_without_probed_field_loads() {
+    let data: CollectedData = serde_json::from_str(PLAN_1_DATA).unwrap();
+    assert!(data.pages.iter().all(|p| !p.probed));
+    let result = assemble(meta(), data, None);
+
+    assert!(
+        result
+            .rows
+            .iter()
+            .all(|r| r.indexable != Indexability::NotAnalyzed)
+    );
+    let codes: Vec<String> = result
+        .findings
+        .iter()
+        .map(|f| format!("{:?}", f.code))
+        .collect();
+    assert_eq!(
+        codes,
+        [
+            "BrokenInternalLink",
+            "SitemapNotFound",
+            "DuplicateContent",
+            "DuplicateContent",
+            "TitleTooShort",
+            "TitleTooShort",
+            "MetaDescriptionMissing",
+            "TitleDuplicate",
+            "TitleDuplicate",
+            "SecurityHeadersMissing",
+        ]
+    );
 }

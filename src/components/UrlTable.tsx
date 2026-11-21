@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMemo, useRef, useState } from "react";
 import { t } from "../i18n/fr";
-import { filterRows, httpTone, sortRows, statusText, type StatusClass } from "../lib/table";
+import { filterRows, httpTone, indexableText, indexableTone, sortRows, statusText, type StatusClass } from "../lib/table";
 import { normalizeUrl } from "../lib/urls";
 import type { UrlRow } from "../lib/types";
 
@@ -57,8 +57,8 @@ const COLUMNS: Column[] = [
     key: "indexable",
     label: t("col_indexable"),
     width: "calc(12ch + 18px)",
-    render: (r) => (r.indexable ? t("yes") : t("no")),
-    tone: (r) => (r.indexable ? "tone-ok" : "tone-err"),
+    render: (r) => indexableText(r.indexable),
+    tone: (r) => indexableTone(r.indexable),
   },
   { key: "depth", label: t("col_depth"), width: "calc(9ch + 18px)", render: (r) => text(r.depth), numeric: true, tone: (r) => (isEmpty(r.depth) ? "dim" : "") },
   { key: "inlinks", label: t("col_inlinks"), width: "calc(14ch + 18px)", render: (r) => text(r.inlinks), numeric: true, tone: (r) => (isEmpty(r.inlinks) ? "dim" : "") },

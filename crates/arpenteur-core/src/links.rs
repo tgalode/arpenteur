@@ -156,6 +156,7 @@ mod tests {
             elapsed_ms: 0,
             headers: BTreeMap::new(),
             facts: None,
+            probed: false,
         })
     }
 
