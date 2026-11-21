@@ -14,11 +14,19 @@ pub fn parse_url_list(input: &str) -> Result<Vec<Url>, Vec<String>> {
     let mut first: Option<Url> = None;
     let mut seen: HashSet<String> = HashSet::new();
     for (index, line) in input.lines().enumerate() {
-        let line = line.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+        // Deux colonnes copiées d'un tableur : seule la première est l'adresse.
+        let first_field = line.split('\t').next().unwrap_or_default();
+        let line = first_field.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
         if line.is_empty() {
             continue;
         }
         let number = index + 1;
+        if line.contains(char::is_whitespace) {
+            errors.push(format!(
+                "ligne {number} : « {line} » contient une espace : une seule adresse par ligne"
+            ));
+            continue;
+        }
         let parsed = Url::parse(line)
             .ok()
             .filter(|u| matches!(u.scheme(), "http" | "https") && u.host_str().is_some());
@@ -121,6 +129,42 @@ mod tests {
         assert_eq!(
             errors,
             ["ligne 1 : « exemple.fr/a » n'est pas une adresse http ou https"]
+        );
+    }
+
+    #[test]
+    fn spreadsheet_columns_keep_the_first_field() {
+        let urls = parse_url_list(
+            "https://exemple.fr/tarifs\tTarifs\nhttps://exemple.fr/a\t\thttps://exemple.fr/b\n",
+        )
+        .unwrap();
+        assert_eq!(
+            strings(&urls),
+            ["https://exemple.fr/tarifs", "https://exemple.fr/a"]
+        );
+    }
+
+    #[test]
+    fn empty_first_column_is_an_empty_line() {
+        let urls = parse_url_list("https://exemple.fr/\n\thttps://exemple.fr/x\n").unwrap();
+        assert_eq!(strings(&urls), ["https://exemple.fr/"]);
+        assert_eq!(
+            parse_url_list("\thttps://exemple.fr/x\n").unwrap_err(),
+            ["La liste est vide."]
+        );
+    }
+
+    #[test]
+    fn inner_space_is_refused_with_its_line_number() {
+        let errors = parse_url_list(
+            "https://exemple.fr/\n\nhttps://exemple.fr/a b\nhttps://exemple.fr/ok\n",
+        )
+        .unwrap_err();
+        assert_eq!(
+            errors,
+            [
+                "ligne 3 : « https://exemple.fr/a b » contient une espace : une seule adresse par ligne"
+            ]
         );
     }
 

@@ -68,7 +68,7 @@ pub fn analyze_links(pages: &[PageRecord], start_url: &str) -> LinkReport {
     }
 }
 
-fn redirect_target(url: &str, page: &PageRecord) -> Option<String> {
+pub(crate) fn redirect_target(url: &str, page: &PageRecord) -> Option<String> {
     let location = page.location()?.trim();
     if location.is_empty() {
         return None;

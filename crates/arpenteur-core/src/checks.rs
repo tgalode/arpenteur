@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use siteone_crawler::result::visited_url::ERROR_SKIPPED;
 use url::Url;
 
-use crate::links::analyze_links;
+use crate::links::{analyze_links, redirect_target};
 use crate::model::{
     CollectedData, CrawlMeta, CrawlMode, CrawlResult, CrawlStatus, ExternalCheck, ExternalOutcome,
     FACTS_VERSION, Finding, FindingCode, Indexability, LinkReport, PageFacts, PageRecord,
@@ -135,6 +135,38 @@ fn missing_security_headers(page: &PageRecord) -> Vec<&'static str> {
         .collect()
 }
 
+/// Mode liste : les adresses listées et les pages où mènent leurs redirections (chaînes comprises).
+fn list_scope(pages: &[PageRecord], listed: &BTreeSet<String>) -> BTreeSet<String> {
+    let redirects: BTreeMap<String, String> = pages
+        .iter()
+        .filter(|p| (300..400).contains(&p.status))
+        .filter_map(|p| Some((norm(&p.url), redirect_target(&p.url, p)?)))
+        .collect();
+    let mut scope = listed.clone();
+    for first in listed {
+        let mut current = first;
+        while let Some(next) = redirects.get(current) {
+            if !scope.insert(next.clone()) {
+                break;
+            }
+            current = next;
+        }
+    }
+    scope
+}
+
+/// Adresse qui porte les constats de site : l'adresse de départ, sauf en mode liste quand elle
+/// n'a pas de ligne (écartée par robots.txt ou un motif) : la page de référence la remplace.
+pub fn site_finding_url(pages: &[PageRecord], start_url: &str, list_mode: bool) -> String {
+    let start_key = norm(start_url);
+    if list_mode && !pages.iter().any(|p| norm(&p.url) == start_key) {
+        if let Some(page) = reference_page(pages, start_url) {
+            return page.url.clone();
+        }
+    }
+    start_url.to_string()
+}
+
 pub struct CheckInput<'a> {
     pub pages: &'a [PageRecord],
     pub links: &'a LinkReport,
@@ -185,7 +217,13 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
     } = *input;
     let list_mode = list.is_some();
     let listed: BTreeSet<String> = list.unwrap_or_default().iter().map(|u| norm(u)).collect();
-    let in_scope = |url: &str| !list_mode || listed.contains(&norm(url));
+    let scope = if list_mode {
+        list_scope(pages, &listed)
+    } else {
+        BTreeSet::new()
+    };
+    let in_scope = |url: &str| !list_mode || scope.contains(&norm(url));
+    let site_url = site_finding_url(pages, start_url, list_mode);
     let start = Url::parse(&norm(start_url)).ok();
     let is_internal = |raw: &str| match (&start, Url::parse(&norm(raw))) {
         (Some(s), Ok(t)) => is_same_site(s, &t),
@@ -482,7 +520,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
     if let Some(encoding) = start_content_encoding.filter(|v| !has_brotli(v)) {
         push(
             FindingCode::ModernCompressionMissing,
-            start_url,
+            &site_url,
             vec![],
             (!encoding.is_empty()).then(|| encoding.to_string()),
         );
@@ -493,7 +531,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
         if !missing.is_empty() {
             push(
                 FindingCode::SecurityHeadersMissing,
-                start_url,
+                &site_url,
                 missing.iter().map(|h| h.to_string()).collect(),
                 Some(format!("Absents : {}.", missing.join(", "))),
             );
@@ -587,7 +625,8 @@ pub fn assemble(
         ..CheckInput::new(&data.pages, &links, &data.sitemap, &meta.start_url)
     });
     if let Some(summary) = &siteone {
-        findings.extend(site_findings(summary, &meta.start_url));
+        let site_url = site_finding_url(&data.pages, &meta.start_url, meta.mode == CrawlMode::List);
+        findings.extend(site_findings(summary, &site_url));
     }
     let rows = build_rows(&data.pages, &links, meta.mode, &meta.list_urls);
     CrawlResult {
@@ -2097,6 +2136,81 @@ mod tests {
         assert!(broken(Some(&["/"])).is_empty());
         assert_eq!(broken(Some(&["/", "/old"])), [full("/old")]);
         assert_eq!(broken(None), [full("/old")]);
+    }
+
+    #[test]
+    fn list_mode_scope_follows_redirects_of_listed_addresses() {
+        let twins = |path: &str| html(path).title(Some("Même titre")).rec();
+        let pages = vec![
+            redirect("/a", 301, &full("/a-final")),
+            redirect("/b", 301, &full("/b-mid")),
+            redirect("/b-mid", 301, &full("/b-final")),
+            twins("/a-final"),
+            twins("/b-final"),
+            twins("/hors"),
+        ];
+        let found =
+            |list: &[&str]| urls_of(&run_list(&pages, Some(list)), FindingCode::TitleDuplicate);
+        assert_eq!(found(&["/a", "/b"]), [full("/a-final"), full("/b-final")]);
+        // Une page hors liste qui n'est la cible d'aucune redirection reste hors périmètre.
+        assert!(found(&["/a"]).is_empty());
+    }
+
+    #[test]
+    fn list_mode_reports_broken_link_to_the_redirect_target_of_a_listed_address() {
+        let pages = vec![
+            html("/").links(&["/gone", "/probe-target"]).rec(),
+            redirect("/moved", 301, &full("/gone")),
+            other("/gone", 404, "html"),
+            other("/probe-target", 404, "html"),
+        ];
+        let broken = |list: &[&str]| {
+            urls_of(
+                &run_list(&pages, Some(list)),
+                FindingCode::BrokenInternalLink,
+            )
+        };
+        // `/gone` est la cible de la redirection de `/moved`, listée ; `/probe-target` n'est
+        // la cible d'aucune.
+        assert_eq!(broken(&["/", "/moved"]), [full("/gone")]);
+        assert!(broken(&["/"]).is_empty());
+    }
+
+    #[test]
+    fn list_mode_site_findings_point_at_a_row() {
+        let sm = no_sitemap();
+        let run = |pages: &[PageRecord], list: &[&str]| {
+            let links = analyze_links(pages, START);
+            let listed: Vec<String> = list.iter().map(|p| full(p)).collect();
+            run_checks(&CheckInput {
+                list: Some(&listed[..]),
+                start_content_encoding: Some("gzip"),
+                ..CheckInput::new(pages, &links, &sm, START)
+            })
+        };
+        let site_urls = |f: &[Finding]| {
+            let mut v = urls_of(f, FindingCode::SecurityHeadersMissing);
+            v.extend(urls_of(f, FindingCode::ModernCompressionMissing));
+            v
+        };
+        // Première adresse sans ligne (écartée) : la page de référence porte les constats.
+        let pages = vec![html("/b").rec()];
+        assert_eq!(
+            site_urls(&run(&pages, &["/", "/b"])),
+            [full("/b"), full("/b")]
+        );
+        // Première adresse crawlée : inchangé.
+        let pages = vec![html("/").rec(), html("/b").rec()];
+        assert_eq!(
+            site_urls(&run(&pages, &["/", "/b"])),
+            [full("/"), full("/")]
+        );
+        // Aucune page de référence : l'adresse de départ.
+        let pages = vec![other("/", 404, "html")];
+        assert_eq!(
+            urls_of(&run(&pages, &["/"]), FindingCode::ModernCompressionMissing),
+            [START]
+        );
     }
 
     #[test]

@@ -77,8 +77,8 @@ use crate::canonical_probe::{ProbeEnv, probe_client, run_post_crawl_probes};
 use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
 use crate::external_links::external_client;
 use crate::model::{
-    CollectedData, CrawlLocation, CrawlMeta, CrawlMode, CrawlSettings, CrawlStatus, ExternalProgress,
-    FACTS_VERSION, Progress, SitemapResult, SkippedUrl,
+    CollectedData, CrawlLocation, CrawlMeta, CrawlMode, CrawlSettings, CrawlStatus,
+    ExternalProgress, FACTS_VERSION, Progress, SitemapResult, SkippedUrl,
 };
 use crate::settings::{
     CrawlError, UrlFilter, build_core_options, build_list_core_options, crawl_seeds,
