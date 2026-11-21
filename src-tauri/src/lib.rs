@@ -25,6 +25,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::start_crawl,
+            commands::start_list_crawl,
             commands::stop_crawl,
             commands::get_settings,
             commands::save_settings,

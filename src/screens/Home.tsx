@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { t, type fr } from "../i18n/fr";
 import { version } from "../../package.json";
-import { listSites, startCrawl } from "../lib/api";
+import { listSites, startCrawl, startListCrawl } from "../lib/api";
 import { statusTone } from "../lib/table";
-import type { CrawlMeta, SiteSummary } from "../lib/types";
+import type { CrawlMeta, CrawlMode, SiteSummary } from "../lib/types";
 
 const dateFormat = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short" });
 
@@ -14,6 +14,10 @@ function statusLabel(meta: CrawlMeta): string {
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : dateFormat.format(d);
+}
+
+function countLines(text: string): number {
+  return text.split(/\r?\n/).filter((l) => l.trim() !== "").length;
 }
 
 export default function Home({
@@ -29,7 +33,9 @@ export default function Home({
     { label: t("settings"), onClick: onSettings },
     { label: t("about"), onClick: onAbout },
   ];
+  const [mode, setMode] = useState<CrawlMode>("site");
   const [url, setUrl] = useState("");
+  const [list, setList] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sites, setSites] = useState<SiteSummary[]>([]);
@@ -49,7 +55,7 @@ export default function Home({
     setError(null);
     setBusy(true);
     try {
-      const { domain, id } = await startCrawl(url);
+      const { domain, id } = await (mode === "list" ? startListCrawl(list) : startCrawl(url));
       onOpen(domain, id, true);
     } catch (err) {
       setError(String(err));
@@ -73,21 +79,45 @@ export default function Home({
       </header>
       <div className="home-body">
         <form className="home-new" onSubmit={submit}>
-          <input
-            type="text"
-            className="field"
-            aria-label={t("urlLabel")}
-            placeholder={t("urlPlaceholder")}
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
+          <div role="radiogroup" aria-label={t("modeLabel")} className="home-mode">
+            {(["site", "list"] as const).map((m) => (
+              <label key={m}>
+                <input type="radio" name="crawl-mode" checked={mode === m} onChange={() => setMode(m)} />
+                {t(m === "site" ? "modeSite" : "modeList")}
+              </label>
+            ))}
+          </div>
+          {mode === "list" ? (
+            <textarea
+              className="field home-list"
+              aria-label={t("listLabel")}
+              placeholder={t("listPlaceholder")}
+              rows={6}
+              value={list}
+              onChange={(e) => setList(e.target.value)}
+            />
+          ) : (
+            <input
+              type="text"
+              className="field"
+              aria-label={t("urlLabel")}
+              placeholder={t("urlPlaceholder")}
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+          )}
+          {mode === "list" && <span className="dim">{t("pages", { count: countLines(list) })}</span>}
           <button type="submit" className="btn btn-primary" disabled={busy}>
             {t("launch")}
           </button>
         </form>
         {error && (
           <p role="alert" className="home-error">
-            {error}
+            {error.split("\n").map((line, i) => (
+              <span key={i} className="home-error-line">
+                {line}
+              </span>
+            ))}
           </p>
         )}
         <h2 className="home-h dim">{t("sites")}</h2>
@@ -112,7 +142,9 @@ export default function Home({
                     >
                       <span className="crawl-date">{formatDate(c.startedAt)}</span>
                       <span className={`crawl-status tone-${statusTone(c.status.kind)}`} title={statusLabel(c)}>{statusLabel(c)}</span>
-                      <span className="dim">{t("pages", { count: c.pages })}</span>
+                      <span className="dim">
+                        {c.mode === "list" ? t("listCrawl", { count: c.listUrls.length }) : t("pages", { count: c.pages })}
+                      </span>
                       <span className="crawl-open dim">{t("open")}</span>
                     </button>
                   </li>

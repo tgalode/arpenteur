@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { findingTitle } from "./catalog";
 import { csvCell, problemsCsv, urlsCsv } from "./csv";
+import { urlColumn } from "./urlColumns";
 import type { Finding, UrlRow } from "./types";
 
 function row(over: Partial<UrlRow> = {}): UrlRow {
@@ -153,4 +154,15 @@ test("le temps est vide sans réponse HTTP et brut sinon", () => {
   expect(cell(row({ status: -6, elapsedMs: 0 }))).toBe("");
   expect(cell(row({ status: 200, elapsedMs: 212 }))).toBe("212");
   expect(cell(row({ status: 404, elapsedMs: 0 }))).toBe("0");
+});
+
+test("en mode liste, profondeur et liens entrants sont des cellules vides dans le CSV et « – » dans le tableau", () => {
+  const listRow = row({ depth: null, inlinks: null, offList: true });
+  const lines = urlsCsv([listRow]).slice(1).split("\r\n");
+  expect(lines[0]).toBe(HEADER);
+  expect(lines[1].split(";")).toHaveLength(16);
+  expect(lines[1].split(";").slice(11, 13)).toEqual(["", ""]);
+  expect(urlColumn("depth").render(listRow)).toBe("–");
+  expect(urlColumn("inlinks").render(listRow)).toBe("–");
+  expect(urlColumn("depth").render(row({ depth: 0 }))).toBe("0");
 });

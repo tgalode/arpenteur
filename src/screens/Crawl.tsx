@@ -3,12 +3,24 @@ import { ProblemsPanel } from "../components/ProblemsPanel";
 import { UrlDetail } from "../components/UrlDetail";
 import { UrlTable } from "../components/UrlTable";
 import { formatElapsed, t } from "../i18n/fr";
-import { exportCsv, loadCrawl, onFinished, onProgress, startCrawl, stopCrawl } from "../lib/api";
+import { exportCsv, loadCrawl, onFinished, onProgress, startCrawl, startListCrawl, stopCrawl } from "../lib/api";
 import { findingTitle } from "../lib/catalog";
 import { problemsCsv, urlsCsv } from "../lib/csv";
 import { statusTone } from "../lib/table";
 import { normalizeUrl } from "../lib/urls";
-import type { CrawlResult, CrawlStatus, FindingCode, Progress, UrlRow } from "../lib/types";
+import type { CrawlResult, CrawlStatus, FindingCode, Progress, SkippedUrl, UrlRow } from "../lib/types";
+
+function skippedMessage(skipped: SkippedUrl[]): string | null {
+  if (skipped.length === 0) return null;
+  const robots = skipped.filter((s) => s.reason === "robots").length;
+  const pattern = skipped.length - robots;
+  const reasons = [
+    robots > 0 ? t("skippedRobots", { count: robots }) : null,
+    pattern > 0 ? t("skippedPattern", { count: pattern }) : null,
+  ].filter(Boolean);
+  const head = skipped.length === 1 ? t("skippedOne") : t("skippedMany", { count: skipped.length });
+  return `${head} : ${reasons.join(", ")}`;
+}
 
 function banner(status: CrawlStatus): string | null {
   switch (status.kind) {
@@ -105,6 +117,7 @@ export function Crawl({
 
   const progressParts = t("progress", { elapsed: progress ? formatElapsed(progress.elapsedMs) : "" }).split("{done}");
   const message = result ? banner(result.meta.status) : null;
+  const skipped = result ? skippedMessage(result.listSkipped) : null;
 
   const urlFilter = useMemo(() => {
     if (!result || !selectedCode) return null;
@@ -122,7 +135,8 @@ export function Crawl({
     if (!result) return;
     setRestarting(true);
     try {
-      const started = await startCrawl(result.meta.startUrl);
+      const { meta } = result;
+      const started = await (meta.mode === "list" ? startListCrawl(meta.listUrls.join("\n")) : startCrawl(meta.startUrl));
       onOpen(started.domain, started.id, true);
     } catch (e) {
       setError(String(e));
@@ -211,6 +225,11 @@ export function Crawl({
               {result.externalUnchecked === 1
                 ? t("externalUncheckedOne")
                 : t("externalUncheckedMany", { count: result.externalUnchecked })}
+            </p>
+          )}
+          {skipped && (
+            <p role="status" className="crawl-banner tone-warn">
+              {skipped}
             </p>
           )}
           <div className="crawl-body">

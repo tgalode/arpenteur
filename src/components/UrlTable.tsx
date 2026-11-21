@@ -146,6 +146,7 @@ export function UrlTable({
                     return (
                       <div key={c.key} role="cell" className={cls || undefined} title={c.tip ? value : undefined}>
                         {value}
+                        {c.key === "url" && r.offList && <span className="tag-off-list">{t("offList")}</span>}
                       </div>
                     );
                   })}

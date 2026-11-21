@@ -14,6 +14,11 @@ export function startCrawl(url: string, settings?: Partial<CrawlSettings>): Prom
   return invoke<StartedCrawl>("start_crawl", { url, settings: settings ?? null });
 }
 
+/** Rejette avec les messages des lignes fautives, séparés par des retours à la ligne. */
+export function startListCrawl(urls: string): Promise<StartedCrawl> {
+  return invoke<StartedCrawl>("start_list_crawl", { urls, settings: null });
+}
+
 export function getSettings(): Promise<CrawlSettings> {
   return invoke<CrawlSettings>("get_settings");
 }

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { CrawlMeta, CrawlStatus, SiteSummary } from "../lib/types";
@@ -6,6 +6,7 @@ import type { CrawlMeta, CrawlStatus, SiteSummary } from "../lib/types";
 vi.mock("../lib/api", () => ({
   listSites: vi.fn(),
   startCrawl: vi.fn(),
+  startListCrawl: vi.fn(),
 }));
 
 import * as api from "../lib/api";
@@ -143,4 +144,81 @@ test("Accueil : le lien à propos appelle onAbout", async () => {
   render(<Home onOpen={() => {}} onSettings={() => {}} onAbout={onAbout} />);
   await userEvent.click(screen.getByRole("button", { name: "à propos" }));
   expect(onAbout).toHaveBeenCalled();
+});
+
+async function chooseList() {
+  await userEvent.click(screen.getByRole("radio", { name: "liste d’URL" }));
+}
+
+test("l’accueil propose « site » et « liste d’URL »", async () => {
+  render(<Home onOpen={() => {}} onSettings={() => {}} onAbout={() => {}} />);
+  const group = screen.getByRole("radiogroup", { name: "mode de crawl" });
+  const site = within(group).getByRole("radio", { name: "site" }) as HTMLInputElement;
+  const list = within(group).getByRole("radio", { name: "liste d’URL" }) as HTMLInputElement;
+  expect(site.checked).toBe(true);
+  expect(list.checked).toBe(false);
+  expect(screen.getByRole("textbox", { name: "adresse du site" }).tagName).toBe("INPUT");
+  await chooseList();
+  expect(list.checked).toBe(true);
+  expect(screen.queryByRole("textbox", { name: "adresse du site" })).toBeNull();
+  expect(screen.getByRole("textbox", { name: "adresses à crawler" }).tagName).toBe("TEXTAREA");
+});
+
+test("en mode liste, le compteur suit les lignes non vides et « lancer » appelle startListCrawl", async () => {
+  vi.mocked(api.startListCrawl).mockResolvedValue({ domain: "exemple.fr", id: "liste-1" });
+  vi.mocked(api.startCrawl).mockClear();
+  const onOpen = vi.fn();
+  render(<Home onOpen={onOpen} onSettings={() => {}} onAbout={() => {}} />);
+  await chooseList();
+  const box = screen.getByRole("textbox", { name: "adresses à crawler" });
+  expect(screen.getByText("0 URL")).toBeTruthy();
+  await userEvent.type(box, "https://exemple.fr/{Enter}{Enter}  {Enter}https://exemple.fr/tarifs{Enter}x");
+  expect(screen.getByText("3 URL")).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "lancer" }));
+  expect(api.startListCrawl).toHaveBeenCalledWith("https://exemple.fr/\n\n  \nhttps://exemple.fr/tarifs\nx");
+  expect(api.startCrawl).not.toHaveBeenCalled();
+  await waitFor(() => expect(onOpen).toHaveBeenCalledWith("exemple.fr", "liste-1", true));
+});
+
+test("les lignes fautives renvoyées par le cœur s’affichent, une par ligne", async () => {
+  vi.mocked(api.startListCrawl).mockRejectedValue(
+    "ligne 2 : « x » n'est pas une adresse http ou https\nligne 4 : « https://autre.fr/ » n'est pas sur le site exemple.fr",
+  );
+  render(<Home onOpen={() => {}} onSettings={() => {}} onAbout={() => {}} />);
+  await chooseList();
+  const box = screen.getByRole("textbox", { name: "adresses à crawler" }) as HTMLTextAreaElement;
+  await userEvent.type(box, "a");
+  await userEvent.click(screen.getByRole("button", { name: "lancer" }));
+  const alert = await screen.findByRole("alert");
+  const lines = within(alert).getAllByText(/^ligne/);
+  expect(lines.map((l) => l.textContent)).toEqual([
+    "ligne 2 : « x » n'est pas une adresse http ou https",
+    "ligne 4 : « https://autre.fr/ » n'est pas sur le site exemple.fr",
+  ]);
+  expect(box.value).toBe("a");
+});
+
+test("une liste plus longue que la limite de requêtes est refusée avec son message", async () => {
+  const message = "la liste compte 20000 adresses, la limite de requêtes est 10000";
+  vi.mocked(api.startListCrawl).mockRejectedValue(message);
+  const onOpen = vi.fn();
+  render(<Home onOpen={onOpen} onSettings={() => {}} onAbout={() => {}} />);
+  await chooseList();
+  await userEvent.type(screen.getByRole("textbox", { name: "adresses à crawler" }), "https://exemple.fr/");
+  await userEvent.click(screen.getByRole("button", { name: "lancer" }));
+  expect((await screen.findByRole("alert")).textContent).toBe(message);
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+test("la liste des crawls affiche « liste, 3 URL »", async () => {
+  const list = { ...meta("l", "2026-03-01T10:00:00Z", 5), mode: "list" as const, listUrls: ["a", "b", "c"].map((p) => `https://exemple.fr/${p}`) };
+  vi.mocked(api.listSites).mockResolvedValue([
+    { domain: "exemple.fr", crawls: [list, meta("s", "2026-01-01T10:00:00Z", 7)] },
+  ]);
+  render(<Home onOpen={() => {}} onSettings={() => {}} onAbout={() => {}} />);
+  const rows = await screen.findAllByRole("button", { name: /ouvrir/ });
+  expect(rows[0].textContent).toContain("liste, 3 URL");
+  expect(rows[0].textContent).not.toContain("5 URL");
+  expect(rows[1].textContent).toContain("7 URL");
+  expect(rows[1].textContent).not.toContain("liste");
 });

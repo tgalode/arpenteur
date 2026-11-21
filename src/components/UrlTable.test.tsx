@@ -183,3 +183,26 @@ test("sans réponse HTTP, le temps est absent", async () => {
   await user.click(screen.getByRole("columnheader", { name: "temps" }));
   expect(times()).toEqual(["212 ms", "–"]);
 });
+
+test("une ligne hors liste porte la mention « hors liste »", () => {
+  renderTable([row("https://exemple.fr/a", "yes"), row("https://exemple.fr/a/", "yes", { offList: true })]);
+  const cells = screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0]);
+  expect(within(cells[0]).queryByText("hors liste")).toBeNull();
+  expect(within(cells[1]).getByText("hors liste")).toBeTruthy();
+  expect(cells[1].textContent).toContain("https://exemple.fr/a/");
+});
+
+test("en mode liste, les lignes sans profondeur ni liens entrants passent en dernier dans les deux sens", async () => {
+  renderTable([
+    row("https://exemple.fr/liste", "yes", { depth: null, inlinks: null }),
+    row("https://exemple.fr/p1", "yes", { depth: 1, inlinks: 4 }),
+    row("https://exemple.fr/p2", "yes", { depth: 2, inlinks: 9 }),
+  ]);
+  const order = () => screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0].textContent);
+  const header = screen.getByRole("columnheader", { name: "prof." });
+  await userEvent.click(header);
+  expect(order()[2]).toBe("https://exemple.fr/liste");
+  await userEvent.click(header);
+  expect(order()[2]).toBe("https://exemple.fr/liste");
+  expect(order()[0]).toBe("https://exemple.fr/p2");
+});

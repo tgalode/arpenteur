@@ -6,6 +6,7 @@ import type { CrawlMeta, CrawlResult, CrawlStatus, Finding, Progress, UrlRow } f
 
 vi.mock("../lib/api", () => ({
   startCrawl: vi.fn(),
+  startListCrawl: vi.fn(),
   stopCrawl: vi.fn(),
   loadCrawl: vi.fn(),
   onProgress: vi.fn(),
@@ -444,4 +445,43 @@ test("un résultat encore en cours, chargé hors suivi, n’affiche aucun bouton
   await screen.findByText("https://exemple.fr/tarifs");
   expect(screen.queryByRole("button", { name: "exporter les URL" })).toBeNull();
   expect(screen.queryByRole("button", { name: "exporter les problèmes" })).toBeNull();
+});
+
+function listResult(): CrawlResult {
+  const r = result({ kind: "completed" });
+  r.meta.mode = "list";
+  r.meta.listUrls = ["https://exemple.fr/", "https://exemple.fr/tarifs"];
+  return r;
+}
+
+test("l’écran du crawl dit combien d’adresses ont été écartées et pourquoi", async () => {
+  const cases: Array<[Array<"robots" | "pattern">, string]> = [
+    [["robots", "robots", "pattern"], "3 adresses écartées : 2 par robots.txt, 1 par un motif"],
+    [["robots", "robots"], "2 adresses écartées : 2 par robots.txt"],
+    [["pattern"], "1 adresse écartée : 1 par un motif"],
+  ];
+  for (const [reasons, text] of cases) {
+    const r = listResult();
+    r.listSkipped = reasons.map((reason, i) => ({ url: `https://exemple.fr/x${i}`, reason }));
+    vi.mocked(api.loadCrawl).mockResolvedValue(r);
+    render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+    const banner = await screen.findByText(text);
+    expect(banner.getAttribute("role")).toBe("status");
+    cleanup();
+  }
+  vi.mocked(api.loadCrawl).mockResolvedValue(listResult());
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByText("https://exemple.fr/tarifs");
+  expect(screen.queryByText(/écartée/)).toBeNull();
+});
+
+test("« relancer » rejoue la liste", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(listResult());
+  vi.mocked(api.startListCrawl).mockResolvedValue({ domain: "exemple.fr", id: "nouvel-id" });
+  const onOpen = vi.fn();
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={onOpen} />);
+  await userEvent.click(await screen.findByRole("button", { name: "relancer" }));
+  expect(vi.mocked(api.startListCrawl).mock.calls).toEqual([["https://exemple.fr/\nhttps://exemple.fr/tarifs"]]);
+  expect(api.startCrawl).not.toHaveBeenCalled();
+  await waitFor(() => expect(onOpen).toHaveBeenCalledWith("exemple.fr", "nouvel-id", true));
 });

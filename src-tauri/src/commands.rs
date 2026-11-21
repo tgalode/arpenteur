@@ -8,6 +8,7 @@ use arpenteur_core::model::{
 };
 use arpenteur_core::settings::normalize_start_url;
 use arpenteur_core::storage::domain_key;
+use arpenteur_core::url_list::{check_list_size, parse_url_list};
 use chrono::Local;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -32,11 +33,44 @@ pub fn start_crawl(
     let start = normalize_start_url(&url).map_err(|e| e.to_string())?;
     let settings = settings.unwrap_or_else(|| state.store.read_default_settings());
     validate_settings(&settings).map_err(|errors| errors.join(" "))?;
+    begin_crawl(app, &state, settings, CrawlTarget::Site(start))
+}
+
+/// Les messages de réglages, de lignes fautives puis de taille sont renvoyés avant de prendre la place du crawl.
+#[tauri::command]
+pub fn start_list_crawl(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    urls: String,
+    settings: Option<CrawlSettings>,
+) -> Result<StartedCrawl, String> {
+    let settings = settings.unwrap_or_else(|| state.store.read_default_settings());
+    validate_settings(&settings).map_err(|errors| errors.join("\n"))?;
+    let list = parse_url_list(&urls).map_err(|errors| errors.join("\n"))?;
+    check_list_size(&list, &settings)?;
+    begin_crawl(app, &state, settings, CrawlTarget::List(list))
+}
+
+/// Le crawl est rangé sous le site de la première adresse, même si robots.txt l'écarte ensuite.
+fn target_site_key(target: &CrawlTarget) -> String {
+    let first = match target {
+        CrawlTarget::Site(url) => Some(url),
+        CrawlTarget::List(urls) => urls.first(),
+    };
+    domain_key(first.and_then(|u| u.host_str()).unwrap_or_default())
+}
+
+fn begin_crawl(
+    app: AppHandle,
+    state: &State<'_, AppState>,
+    settings: CrawlSettings,
+    target: CrawlTarget,
+) -> Result<StartedCrawl, String> {
     let running = state
         .try_begin()
         .map_err(|_| "Un crawl est déjà en cours.".to_string())?;
 
-    let domain = domain_key(start.host_str().unwrap_or_default());
+    let domain = target_site_key(&target);
     let location = match state.store.create_crawl(&domain, Local::now()) {
         Ok(location) => location,
         Err(e) => {
@@ -49,6 +83,14 @@ pub fn start_crawl(
         id: location.id.clone(),
     };
 
+    let (mode, start_url, list_urls) = match &target {
+        CrawlTarget::Site(url) => (CrawlMode::Site, url.as_str().to_string(), Vec::new()),
+        CrawlTarget::List(urls) => (
+            CrawlMode::List,
+            urls.first().map(|u| u.as_str().to_string()).unwrap_or_default(),
+            urls.iter().map(|u| u.as_str().to_string()).collect(),
+        ),
+    };
     let store = state.store.clone();
     let events = Arc::new(TauriEvents::new(app.clone()));
     let run_id = running.id;
@@ -59,7 +101,7 @@ pub fn start_crawl(
         let _guard = FinishGuard(&state, run_id);
         let inner = tauri::async_runtime::spawn(run_crawl(
             settings.clone(),
-            CrawlTarget::Site(start.clone()),
+            target,
             store.clone(),
             location.clone(),
             events,
@@ -71,7 +113,7 @@ pub fn start_crawl(
                 let meta = CrawlMeta {
                     id: location.id.clone(),
                     domain: location.domain.clone(),
-                    start_url: start.as_str().to_string(),
+                    start_url,
                     started_at,
                     finished_at: Some(Local::now().to_rfc3339()),
                     status: CrawlStatus::Failed {
@@ -79,8 +121,8 @@ pub fn start_crawl(
                     },
                     settings,
                     pages: 0,
-                    mode: CrawlMode::Site,
-                    list_urls: Vec::new(),
+                    mode,
+                    list_urls,
                 };
                 let _ = store.write_meta(&location, &meta);
                 meta
@@ -153,6 +195,17 @@ pub fn export_file(path: String, contents: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tauri::Url;
+
+    #[test]
+    fn list_crawl_is_filed_under_the_first_url_site() {
+        let urls = ["https://www.exemple.fr/tarifs", "https://www.exemple.fr/"]
+            .map(|u| Url::parse(u).unwrap())
+            .to_vec();
+        let site = CrawlTarget::Site(Url::parse("https://www.exemple.fr/").unwrap());
+        assert_eq!(target_site_key(&CrawlTarget::List(urls)), target_site_key(&site));
+        assert_eq!(target_site_key(&site), domain_key("www.exemple.fr"));
+    }
 
     #[test]
     fn export_file_rejects_other_extensions() {
