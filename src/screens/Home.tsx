@@ -106,6 +106,7 @@ export default function Home({
               onChange={(e) => setUrl(e.target.value)}
             />
           )}
+          {mode === "list" && <span className="home-break" aria-hidden="true" />}
           {mode === "list" && <span className="dim">{t("pages", { count: countLines(list) })}</span>}
           <button type="submit" className="btn btn-primary" disabled={busy}>
             {t("launch")}

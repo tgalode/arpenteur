@@ -58,6 +58,7 @@ export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult })
   return (
     <section aria-label={t("detail_label", { url: row.url })} tabIndex={0} className="detail">
       <h2 className="strong">{row.url}</h2>
+      {row.offList && <p className="dim">{t("detail_offList")}</p>}
       <dl>
         <dt>{t("detail_canonical")}</dt>
         <dd>{canonical ?? t("none")}</dd>

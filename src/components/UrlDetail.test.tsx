@@ -57,6 +57,15 @@ function detail(url: string, findings: Finding[], urls: string[], extra: Partial
   return within(screen.getByRole("region"));
 }
 
+test("le détail d'une ligne hors liste le dit, celui d'une ligne de la liste non", () => {
+  const off = { ...result([], [site("/a")]), rows: [{ ...row(site("/a")), offList: true }] };
+  render(<UrlDetail row={off.rows[0]} result={off} />);
+  expect(within(screen.getByRole("region")).getByText(/hors liste/i)).toBeTruthy();
+  cleanup();
+  const listed = detail(site("/a"), [], [site("/a")]);
+  expect(listed.queryByText(/hors liste/i)).toBeNull();
+});
+
 test("un title partagé par 3 pages apparaît une fois par page", () => {
   const pages = [site("/a"), site("/b"), site("/c")];
   const findings = pages.map((url) =>

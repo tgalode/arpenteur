@@ -192,6 +192,21 @@ test("une ligne hors liste porte la mention « hors liste »", () => {
   expect(cells[1].textContent).toContain("https://exemple.fr/a/");
 });
 
+test("la mention « hors liste » est à côté de l'adresse, pas dans le texte coupé par l'ellipse", () => {
+  renderTable([row("https://exemple.fr/a", "yes"), row("https://exemple.fr/a/", "yes", { offList: true })]);
+  const cells = screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0]);
+  const text = within(cells[1]).getByText("https://exemple.fr/a/");
+  const tag = within(cells[1]).getByText("hors liste");
+  expect(text.parentElement).toBe(cells[1]);
+  expect(tag.parentElement).toBe(cells[1]);
+  expect(text.contains(tag)).toBe(false);
+  expect(text.className).toBe("urltable-url-text");
+  expect(tag.className).toBe("tag-off-list");
+  // L'infobulle de la cellule le dit aussi ; une ligne de la liste n'a ni mention ni infobulle.
+  expect(cells[1].getAttribute("title")).toBe("https://exemple.fr/a/ (hors liste)");
+  expect(cells[0].getAttribute("title")).toBe("https://exemple.fr/a");
+});
+
 test("en mode liste, les lignes sans profondeur ni liens entrants passent en dernier dans les deux sens", async () => {
   renderTable([
     row("https://exemple.fr/liste", "yes", { depth: null, inlinks: null }),

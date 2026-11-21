@@ -143,10 +143,22 @@ export function UrlTable({
                     const cls = [c.numeric ? "n" : "", tone.startsWith("tone-") ? tone : tone ? "dim" : ""]
                       .filter(Boolean)
                       .join(" ");
+                    if (c.key === "url") {
+                      return (
+                        <div
+                          key={c.key}
+                          role="cell"
+                          className={["urltable-url", cls].filter(Boolean).join(" ")}
+                          title={c.tip ? (r.offList ? `${value} (${t("offList")})` : value) : undefined}
+                        >
+                          <span className="urltable-url-text">{value}</span>
+                          {r.offList && <span className="tag-off-list">{t("offList")}</span>}
+                        </div>
+                      );
+                    }
                     return (
                       <div key={c.key} role="cell" className={cls || undefined} title={c.tip ? value : undefined}>
                         {value}
-                        {c.key === "url" && r.offList && <span className="tag-off-list">{t("offList")}</span>}
                       </div>
                     );
                   })}

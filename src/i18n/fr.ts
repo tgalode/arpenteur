@@ -86,6 +86,7 @@ export const fr = {
   notAnalyzed: "non analysé",
   none: "–",
   noRows: "aucune URL ne correspond.",
+  detail_offList: "Hors liste : cette adresse ne fait pas partie de la liste crawlée.",
   detail_label: "détail de {url}",
   version: "v{version}",
   detail_canonical: "canonical",

@@ -178,13 +178,10 @@ select {
 
 .home-new {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   margin-bottom: 18px;
-}
-
-.home-new {
-  flex-wrap: wrap;
 }
 
 .home-mode {
@@ -200,13 +197,6 @@ select {
   cursor: pointer;
 }
 
-.home-new .home-list {
-  flex-basis: 100%;
-  max-width: 560px;
-  font-family: inherit;
-  resize: vertical;
-}
-
 .home-error-line {
   display: block;
 }
@@ -216,6 +206,18 @@ select {
   max-width: 360px;
   min-width: 0;
   padding: 5px 9px;
+}
+
+.home-new .field.home-list {
+  flex: 1 1 100%;
+  max-width: 560px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.home-break {
+  flex-basis: 100%;
+  height: 0;
 }
 
 .home-new .btn {
@@ -826,7 +828,20 @@ select {
   background: var(--sel);
 }
 
+.urltable-row > .urltable-url {
+  display: flex;
+  align-items: center;
+}
+
+.urltable-url-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tag-off-list {
+  flex: none;
   margin-left: 8px;
   padding: 0 5px;
   border: 1px solid var(--line);
