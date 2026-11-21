@@ -220,8 +220,15 @@ pub async fn run_post_crawl_probes(
     let (mut external, mut external_unchecked) = (Vec::new(), 0);
     if let Some(client) = external_client {
         let targets = external_targets(pages, env.start);
-        (external, _) =
-            check_external_links(client, &targets, budget, env.min_interval, env.cancel).await;
+        (external, _) = check_external_links(
+            client,
+            env.start,
+            &targets,
+            budget,
+            env.min_interval,
+            env.cancel,
+        )
+        .await;
         external_unchecked = (targets.len() - external.len()) as u32;
     }
     PostCrawl {

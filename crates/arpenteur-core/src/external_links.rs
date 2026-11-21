@@ -35,8 +35,11 @@ pub fn external_targets(pages: &[PageRecord], start: &Url) -> Vec<Url> {
             let Ok(url) = Url::parse(&normalized) else {
                 continue;
             };
+            // Des identifiants dans le lien partiraient en Authorization vers un site tiers.
             if matches!(url.scheme(), "http" | "https")
                 && url.host_str().is_some()
+                && url.username().is_empty()
+                && url.password().is_none()
                 && !is_same_site(start, &url)
                 && seen.insert(normalized)
             {
@@ -76,19 +79,39 @@ pub fn classify_status(status: u16) -> ExternalOutcome {
 /// Échec de résolution du nom de domaine : hyper-util le signale par « dns error » dans la
 /// chaîne des causes. Une résolution temporairement indisponible (EAI_AGAIN) ne prouve rien.
 fn is_dns_failure(error: &reqwest::Error) -> bool {
+    let mut messages = Vec::new();
     let mut source = error.source();
-    let mut dns = false;
     while let Some(cause) = source {
-        let message = cause.to_string().to_lowercase();
+        messages.push(cause.to_string());
+        source = cause.source();
+    }
+    dns_chain(messages.into_iter())
+}
+
+fn dns_chain(messages: impl Iterator<Item = String>) -> bool {
+    let mut dns = false;
+    for message in messages {
+        let message = message.to_lowercase();
         if message == "dns error" {
             dns = true;
         }
         if message.contains("temporary failure") || message.contains("try again") {
             return false;
         }
-        source = cause.source();
     }
     dns
+}
+
+/// « dns error » couvre aussi une machine hors ligne ou un résolveur en panne : avant de
+/// conclure qu'un domaine a disparu, on vérifie que le nom du site audité, lui, se résout.
+async fn resolver_works(start: &Url, cancel: &CancellationToken) -> bool {
+    let (Some(host), Some(port)) = (start.host_str(), start.port_or_known_default()) else {
+        return false;
+    };
+    tokio::select! {
+        r = tokio::net::lookup_host((host, port)) => r.is_ok_and(|mut a| a.next().is_some()),
+        _ = cancel.cancelled() => false,
+    }
 }
 
 enum Attempt {
@@ -134,9 +157,11 @@ fn check_of(
 }
 
 /// Renvoie les vérifications faites et le nombre de requêtes consommées (au plus `budget`).
+/// `start` sert de témoin : son nom doit se résoudre pour qu'un domaine introuvable soit « cassé ».
 /// Une cible absente du résultat n'a pas été vérifiée (budget épuisé ou annulation).
 pub async fn check_external_links(
     client: &reqwest::Client,
+    start: &Url,
     targets: &[Url],
     budget: usize,
     min_interval: Duration,
@@ -144,21 +169,28 @@ pub async fn check_external_links(
 ) -> (Vec<ExternalCheck>, usize) {
     let mut checks = Vec::new();
     let mut used = 0;
+    let mut resolver_unreliable = false;
     for url in targets {
         if used >= budget || !wait_turn(min_interval, cancel).await {
             break;
         }
         used += 1;
         let mut result = attempt(client, url, cancel).await;
-        if matches!(result, Attempt::DnsFailure) && used < budget {
+        if matches!(result, Attempt::DnsFailure) && used < budget && !resolver_unreliable {
             if !wait_turn(min_interval, cancel).await {
                 break;
             }
             used += 1;
             result = attempt(client, url, cancel).await;
             if matches!(result, Attempt::DnsFailure) {
-                checks.push(check_of(url, ExternalOutcome::Broken, None, None));
-                continue;
+                if resolver_works(start, cancel).await {
+                    checks.push(check_of(url, ExternalOutcome::Broken, None, None));
+                    continue;
+                }
+                if cancel.is_cancelled() {
+                    break;
+                }
+                resolver_unreliable = true;
             }
         }
         checks.push(match result {
@@ -172,4 +204,38 @@ pub async fn check_external_links(
         });
     }
     (checks, used)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dns_chain;
+
+    fn chain(messages: &[&str]) -> bool {
+        dns_chain(messages.iter().map(|m| m.to_string()))
+    }
+
+    #[test]
+    fn dns_chain_needs_a_dns_error_cause() {
+        assert!(chain(&[
+            "error sending request",
+            "client error (Connect)",
+            "dns error",
+            "error resolving DNS"
+        ]));
+        assert!(!chain(&[
+            "error sending request",
+            "client error (Connect)",
+            "tcp connect error"
+        ]));
+        assert!(!chain(&["operation timed out"]));
+    }
+
+    #[test]
+    fn temporary_resolver_failures_are_not_dns_failures() {
+        assert!(!chain(&[
+            "dns error",
+            "failed to lookup address information: Temporary failure in name resolution"
+        ]));
+        assert!(!chain(&["dns error", "Try again later"]));
+    }
 }

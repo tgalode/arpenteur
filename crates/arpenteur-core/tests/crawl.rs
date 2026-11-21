@@ -896,13 +896,25 @@ fn ext_url(site: &support::FixtureSite, path: &str) -> Url {
     Url::parse(&format!("http://localhost:{port}{path}")).unwrap()
 }
 
+async fn check_from(
+    start: &str,
+    targets: &[Url],
+    budget: usize,
+    interval: Duration,
+    cancel: &CancellationToken,
+) -> (Vec<arpenteur_core::model::ExternalCheck>, usize) {
+    let start = Url::parse(start).unwrap();
+    check_external_links(&ext_client(), &start, targets, budget, interval, cancel).await
+}
+
+/// Site audité dont le nom se résout (adresse IP littérale).
 async fn check(
     targets: &[Url],
     budget: usize,
     interval: Duration,
     cancel: &CancellationToken,
 ) -> (Vec<arpenteur_core::model::ExternalCheck>, usize) {
-    check_external_links(&ext_client(), targets, budget, interval, cancel).await
+    check_from("http://127.0.0.1/", targets, budget, interval, cancel).await
 }
 
 fn outcome_of(
@@ -962,6 +974,25 @@ fn external_targets_are_distinct_http_links_off_site() {
         targets,
         ["https://autre.fr/a", "http://tiers.fr/b", "https://z.fr/"]
     );
+}
+
+#[test]
+fn links_with_credentials_are_not_targets() {
+    let start = Url::parse("https://exemple.fr/").unwrap();
+    let pages = vec![page_linking(
+        "https://exemple.fr/",
+        &[
+            "https://user:pass@autre.fr/x",
+            "https://user@autre.fr/x",
+            "https://:pass@autre.fr/x",
+            "https://autre.fr/x",
+        ],
+    )];
+    let targets: Vec<String> = external_targets(&pages, &start)
+        .iter()
+        .map(Url::to_string)
+        .collect();
+    assert_eq!(targets, ["https://autre.fr/x"]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1069,6 +1100,42 @@ async fn unknown_domain_is_broken_after_a_second_try() {
     .await;
     assert_eq!(used, 1);
     assert_eq!(outcome_of(&checks, &url).outcome, ExternalOutcome::Unknown);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unresolvable_control_host_makes_dns_failures_unknown() {
+    let gone = |n: &str| Url::parse(&format!("https://{n}.invalid/")).unwrap();
+    let targets = [gone("domaine-inexistant"), gone("autre-domaine")];
+    let (checks, used) = check_from(
+        "https://autre-inexistant.invalid/",
+        &targets,
+        10,
+        Duration::ZERO,
+        &CancellationToken::new(),
+    )
+    .await;
+    // Premier lien : deux essais puis un contrôle raté. Second lien : une seule requête.
+    assert_eq!(used, 3);
+    assert_eq!(checks.len(), 2);
+    for c in &checks {
+        assert_eq!(
+            (c.outcome, c.status),
+            (ExternalOutcome::Unknown, None),
+            "{}",
+            c.url
+        );
+    }
+
+    // Site audité sans hôte (ex. fichier) : pas de contrôle possible, jamais « cassé ».
+    let (checks, _) = check_from(
+        "mailto:a@exemple.fr",
+        &targets[..1],
+        10,
+        Duration::ZERO,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(checks[0].outcome, ExternalOutcome::Unknown);
 }
 
 #[tokio::test(flavor = "multi_thread")]
