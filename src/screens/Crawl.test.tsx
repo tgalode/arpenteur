@@ -165,6 +165,22 @@ test("la progression met à jour le compteur", async () => {
   expect((await screen.findByTestId("progress")).textContent).toBe("2 URL traitées · 4 s");
 });
 
+test("la phase des liens externes remplace la ligne de progression", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
+  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} onOpen={() => {}} />);
+  await waitFor(() => expect(api.loadCrawl).toHaveBeenCalled());
+  act(() => progressCb({ done: 2, lastUrl: "u", lastStatus: 200, elapsedMs: 4000 }));
+  expect((await screen.findByTestId("progress")).textContent).toBe("2 URL traitées · 4 s");
+  act(() =>
+    progressCb({ done: 2, lastUrl: "", lastStatus: 0, elapsedMs: 5000, external: { done: 12, total: 48 } }),
+  );
+  expect((await screen.findByTestId("progress")).textContent).toBe("vérification des liens externes : 12 / 48");
+  expect(screen.getByRole("button", { name: "arrêter" })).toBeTruthy();
+  // Un événement sans le champ (crawl de pages) revient à la ligne habituelle.
+  act(() => progressCb({ done: 3, lastUrl: "u", lastStatus: 200, elapsedMs: 6000 }));
+  expect((await screen.findByTestId("progress")).textContent).toBe("3 URL traitées · 6 s");
+});
+
 test("arrêter appelle stopCrawl", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
   render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} onOpen={() => {}} />);
@@ -242,6 +258,13 @@ test("un crawl arrêté affiche son bandeau", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "stopped" }));
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
   expect(await screen.findByText("crawl arrêté avant la fin.")).toBeTruthy();
+});
+
+test("un crawl arrêté sans lien non vérifié n'affiche pas la limite de requêtes", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue({ ...result({ kind: "stopped" }), externalUnchecked: 0 });
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  expect(await screen.findByText("crawl arrêté avant la fin.")).toBeTruthy();
+  expect(screen.queryByText(/limite de requêtes/)).toBeNull();
 });
 
 test("l'écran du crawl signale les liens externes non vérifiés", async () => {

@@ -123,6 +123,39 @@ impl CrawlEvents for NoEvents {
     fn progress(&self, _p: &Progress) {}
 }
 
+/// Garde les progressions reçues ; annule au `cancel_at`-ième lien externe vérifié.
+struct ExternalWatcher {
+    seen: std::sync::Mutex<Vec<Progress>>,
+    cancel: CancellationToken,
+    cancel_at: Option<u32>,
+}
+
+impl ExternalWatcher {
+    fn new(cancel: &CancellationToken, cancel_at: Option<u32>) -> Arc<ExternalWatcher> {
+        Arc::new(ExternalWatcher {
+            seen: Default::default(),
+            cancel: cancel.clone(),
+            cancel_at,
+        })
+    }
+
+    fn external(&self) -> Vec<(u32, u32)> {
+        let seen = self.seen.lock().unwrap();
+        seen.iter()
+            .filter_map(|p| p.external.map(|e| (e.done, e.total)))
+            .collect()
+    }
+}
+
+impl CrawlEvents for ExternalWatcher {
+    fn progress(&self, p: &Progress) {
+        self.seen.lock().unwrap().push(p.clone());
+        if p.external.is_some_and(|e| Some(e.done) == self.cancel_at) {
+            self.cancel.cancel();
+        }
+    }
+}
+
 struct CancelOnFirstProgress(CancellationToken);
 
 impl CrawlEvents for CancelOnFirstProgress {
@@ -407,6 +440,7 @@ async fn probe_targets_with(
         filter: &filter,
         min_interval: Duration::ZERO,
         cancel,
+        on_external_progress: &|_, _| {},
     };
     probe_canonical_targets(&env, pages, budget).await.0
 }
@@ -426,6 +460,7 @@ async fn post_probes(
         filter: &filter,
         min_interval,
         cancel,
+        on_external_progress: &|_, _| {},
     };
     run_post_crawl_probes(&env, pages, max_requests, None).await
 }
@@ -912,7 +947,7 @@ async fn check(
     interval: Duration,
     cancel: &CancellationToken,
 ) -> (Vec<arpenteur_core::model::ExternalCheck>, usize) {
-    check_external_links(&ext_client(), targets, budget, interval, cancel).await
+    check_external_links(&ext_client(), targets, budget, interval, cancel, &|_, _| {}).await
 }
 
 fn outcome_of(
@@ -1244,11 +1279,51 @@ async fn crawl_budget_leaves_links_unchecked() {
         max_requests: 7,
         ..fast_settings()
     };
-    let (site, store, loc, _meta, _root) = crawl_external(settings, false).await;
+    let (site, store, loc, meta, _root) = crawl_external(settings, false).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
     let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
     assert_eq!(data.external_links.len(), 4);
     assert_eq!(data.external_unchecked, 6);
     assert_eq!(site.count("/ext-hang"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn external_checks_report_done_and_total() {
+    let watcher = std::sync::Mutex::new(None);
+    let (_site, _store, _loc, meta, _root) =
+        run_with(Variant::ExternalLinks, fast_settings(), |cancel| {
+            let w = ExternalWatcher::new(cancel, None);
+            *watcher.lock().unwrap() = Some(w.clone());
+            w
+        })
+        .await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    let w = watcher.lock().unwrap().take().unwrap();
+    let expected: Vec<(u32, u32)> = (0..=10).map(|d| (d, 10)).collect();
+    assert_eq!(w.external(), expected);
+    // Les progressions du crawl lui-même n'ont pas ce champ.
+    let seen = w.seen.lock().unwrap();
+    assert!(seen.iter().take(2).all(|p| p.external.is_none()));
+    assert!(seen.iter().all(|p| p.external.is_none() || p.done == 2));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stop_during_external_checks_is_a_stopped_crawl() {
+    let watcher = std::sync::Mutex::new(None);
+    let (site, store, loc, meta, _root) =
+        run_with(Variant::ExternalLinks, fast_settings(), |cancel| {
+            let w = ExternalWatcher::new(cancel, Some(3));
+            *watcher.lock().unwrap() = Some(w.clone());
+            w
+        })
+        .await;
+    assert_eq!(meta.status, CrawlStatus::Stopped);
+    let (m, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(m.status, CrawlStatus::Stopped);
+    assert_eq!(m.pages, 2);
+    assert_eq!(data.external_links.len(), 3);
+    assert_eq!(data.external_unchecked, 0);
+    assert!(!site.requested("/ext-hang"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

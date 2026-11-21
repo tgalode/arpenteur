@@ -22,6 +22,8 @@ export interface Progress {
   lastUrl: string;
   lastStatus: number;
   elapsedMs: number;
+  /** Présent pendant la vérification des liens externes, après le crawl. */
+  external?: { done: number; total: number } | null;
 }
 
 export interface PageFacts {

@@ -140,6 +140,7 @@ impl Analyzer for PageCollector {
             last_url: visited_url.url.clone(),
             last_status: visited_url.status_code,
             elapsed_ms: self.started.elapsed().as_millis() as u64,
+            external: None,
         });
 
         if self.guard.observe(visited_url.status_code) {

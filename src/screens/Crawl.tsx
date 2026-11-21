@@ -194,9 +194,15 @@ export function Crawl({
                   <>
                     <span className="crawl-pulse" aria-hidden="true" />
                     <span data-testid="progress">
-                      {progressParts[0]}
-                      <em>{progress.done}</em>
-                      {progressParts[1]}
+                      {progress.external ? (
+                        t("progressExternal", { done: progress.external.done, total: progress.external.total })
+                      ) : (
+                        <>
+                          {progressParts[0]}
+                          <em>{progress.done}</em>
+                          {progressParts[1]}
+                        </>
+                      )}
                     </span>
                   </>
                 ) : (

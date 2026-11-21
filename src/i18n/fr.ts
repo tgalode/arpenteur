@@ -19,6 +19,7 @@ export const fr = {
   skippedRobots: "{count} par robots.txt",
   skippedPattern: "{count} par un motif",
   progress: "{done} URL traitées · {elapsed}",
+  progressExternal: "vérification des liens externes : {done} / {total}",
   back: "retour",
   status_running: "en cours",
   status_completed: "terminé",

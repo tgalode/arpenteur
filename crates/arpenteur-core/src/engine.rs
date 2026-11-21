@@ -77,8 +77,8 @@ use crate::canonical_probe::{ProbeEnv, probe_client, run_post_crawl_probes};
 use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
 use crate::external_links::external_client;
 use crate::model::{
-    CollectedData, CrawlLocation, CrawlMeta, CrawlMode, CrawlSettings, CrawlStatus, FACTS_VERSION,
-    SitemapResult, SkippedUrl,
+    CollectedData, CrawlLocation, CrawlMeta, CrawlMode, CrawlSettings, CrawlStatus, ExternalProgress,
+    FACTS_VERSION, Progress, SitemapResult, SkippedUrl,
 };
 use crate::settings::{
     CrawlError, UrlFilter, build_core_options, build_list_core_options, crawl_seeds,
@@ -297,8 +297,10 @@ pub async fn run_crawl(
     };
     let initial_write = store.write_meta(&location, &meta);
 
+    let started = std::time::Instant::now();
+    let post_events = events.clone();
     let Executed {
-        status,
+        mut status,
         handle,
         sitemap,
         list_skipped,
@@ -315,12 +317,23 @@ pub async fn run_crawl(
         if let Ok((min_interval, _)) = sitemap_budget(&settings) {
             if let Ok(client) = probe_client(&plain_user_agent(&settings)) {
                 let filter = UrlFilter::new(&settings, sitemap.robots_txt.as_deref());
+                let pages_done = pages.len() as u32;
+                let report = |done: u32, total: u32| {
+                    post_events.progress(&Progress {
+                        done: pages_done,
+                        last_url: String::new(),
+                        last_status: 0,
+                        elapsed_ms: started.elapsed().as_millis() as u64,
+                        external: Some(ExternalProgress { done, total }),
+                    });
+                };
                 let env = ProbeEnv {
                     client: &client,
                     start,
                     filter: &filter,
                     min_interval,
                     cancel: &cancel,
+                    on_external_progress: &report,
                 };
                 let external = settings
                     .check_external_links
@@ -338,6 +351,10 @@ pub async fn run_crawl(
                 external_unchecked = probed.external_unchecked;
                 pages.extend(probed.pages);
             }
+        }
+        // Les pages sont complètes, les vérifications non : on le dit.
+        if cancel.is_cancelled() {
+            status = CrawlStatus::Stopped;
         }
     }
     meta.pages = pages.iter().filter(|p| !p.probed).count() as u32;

@@ -153,13 +153,19 @@ fn check_of(
 /// seulement si une autre cible a reçu une réponse HTTP pendant ce run (preuve que les noms
 /// externes se résolvent), sinon « inconnue ».
 /// Une cible absente du résultat n'a pas été vérifiée (budget épuisé ou annulation).
+/// `on_progress(faites, total)` est appelée au début puis après chaque cible vérifiée.
 pub async fn check_external_links(
     client: &reqwest::Client,
     targets: &[Url],
     budget: usize,
     min_interval: Duration,
     cancel: &CancellationToken,
+    on_progress: &(dyn Fn(u32, u32) + Send + Sync),
 ) -> (Vec<ExternalCheck>, usize) {
+    let total = targets.len() as u32;
+    if total > 0 {
+        on_progress(0, total);
+    }
     let mut checks = Vec::new();
     let mut used = 0;
     let mut answered = false;
@@ -190,6 +196,7 @@ pub async fn check_external_links(
             }
             Attempt::Cancelled => break,
         });
+        on_progress(checks.len() as u32, total);
     }
     if answered {
         for index in vanished {

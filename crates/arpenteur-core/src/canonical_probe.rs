@@ -24,13 +24,15 @@ pub struct ProbeEnv<'a> {
     pub filter: &'a UrlFilter,
     pub min_interval: Duration,
     pub cancel: &'a CancellationToken,
+    /// `(faites, total)` pendant la vérification des liens externes.
+    pub on_external_progress: &'a (dyn Fn(u32, u32) + Send + Sync),
 }
 
 pub struct PostCrawl {
     pub content_encoding: Option<String>,
     pub pages: Vec<PageRecord>,
     pub external: Vec<ExternalCheck>,
-    /// Adresses externes non demandées : budget épuisé ou annulation.
+    /// Adresses externes non demandées parce que le budget est épuisé (pas après un arrêt).
     pub external_unchecked: u32,
 }
 
@@ -226,9 +228,12 @@ pub async fn run_post_crawl_probes(
             budget,
             env.min_interval,
             env.cancel,
+            env.on_external_progress,
         )
         .await;
-        external_unchecked = (targets.len() - external.len()) as u32;
+        if !env.cancel.is_cancelled() {
+            external_unchecked = (targets.len() - external.len()) as u32;
+        }
     }
     PostCrawl {
         content_encoding,

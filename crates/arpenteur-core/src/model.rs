@@ -58,6 +58,15 @@ pub struct Progress {
     pub last_url: String,
     pub last_status: i32,
     pub elapsed_ms: u64,
+    /// Présent pendant la vérification des liens externes, après le crawl.
+    #[serde(default)]
+    pub external: Option<ExternalProgress>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExternalProgress {
+    pub done: u32,
+    pub total: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -355,4 +364,18 @@ pub struct CrawlResult {
     pub external_unchecked: u32,
     #[serde(default)]
     pub list_skipped: Vec<SkippedUrl>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Progress;
+
+    #[test]
+    fn progress_without_external_field_still_reads() {
+        let p: Progress = serde_json::from_str(
+            r#"{"done":3,"lastUrl":"https://exemple.fr/","lastStatus":200,"elapsedMs":10}"#,
+        )
+        .unwrap();
+        assert_eq!(p.external, None);
+    }
 }
