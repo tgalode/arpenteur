@@ -1484,3 +1484,14 @@ async fn list_mode_runs_post_crawl_probes() {
     ));
     assert!(has(&r, FindingCode::ModernCompressionMissing, "/"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_mode_image_of_a_listed_page_is_not_off_list() {
+    let (site, store, loc, meta, _root) =
+        run_list(Variant::Standard, fast_settings(), &["/b"]).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    assert!(site.requested("/img/big.jpg"));
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    assert!(!row(&r, "/img/big.jpg").off_list);
+    assert!(!row(&r, "/b").off_list);
+}

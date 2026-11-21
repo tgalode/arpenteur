@@ -145,8 +145,9 @@ pub struct CheckInput<'a> {
     /// Crawl limité par le serveur : ses 503 et 429 ne sont pas des erreurs du site.
     pub throttled: bool,
     pub external_links: &'a [ExternalCheck],
-    /// Mode liste : les contrôles qui ont besoin du site entier ne tournent pas.
-    pub list_mode: bool,
+    /// Mode liste : les adresses de la liste. Les contrôles qui ont besoin du site entier
+    /// ne tournent pas, et les constats ne portent que sur les pages de la liste.
+    pub list: Option<&'a [String]>,
 }
 
 impl<'a> CheckInput<'a> {
@@ -165,7 +166,7 @@ impl<'a> CheckInput<'a> {
             facts_version: FACTS_VERSION,
             throttled: false,
             external_links: &[],
-            list_mode: false,
+            list: None,
         }
     }
 }
@@ -180,8 +181,11 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
         facts_version,
         throttled,
         external_links,
-        list_mode,
+        list,
     } = *input;
+    let list_mode = list.is_some();
+    let listed: BTreeSet<String> = list.unwrap_or_default().iter().map(|u| norm(u)).collect();
+    let in_scope = |url: &str| !list_mode || listed.contains(&norm(url));
     let start = Url::parse(&norm(start_url)).ok();
     let is_internal = |raw: &str| match (&start, Url::parse(&norm(raw))) {
         (Some(s), Ok(t)) => is_same_site(s, &t),
@@ -335,7 +339,11 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
         let Some(page) = by_url.get(target) else {
             continue;
         };
-        if is_internal(target) && is_error(page, throttled) && !sources.is_empty() {
+        if is_internal(target)
+            && in_scope(target)
+            && is_error(page, throttled)
+            && !sources.is_empty()
+        {
             let related: BTreeSet<String> = sources.iter().map(|s| s.from.clone()).collect();
             push(
                 FindingCode::BrokenInternalLink,
@@ -414,7 +422,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
     let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for page in pages
         .iter()
-        .filter(|p| is_html_200(p) && is_internal(&p.url))
+        .filter(|p| is_html_200(p) && is_internal(&p.url) && in_scope(&p.url))
     {
         if let Some(f) = &page.facts {
             if f.word_count > 0 {
@@ -436,7 +444,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
 
     let indexable: Vec<&PageRecord> = pages
         .iter()
-        .filter(|p| is_internal(&p.url) && is_indexable(p))
+        .filter(|p| is_internal(&p.url) && in_scope(&p.url) && is_indexable(p))
         .collect();
     for (code, text_of) in [
         (
@@ -553,7 +561,9 @@ pub fn build_rows(
                 },
                 inlinks: (!list_mode)
                     .then(|| links.inlinks.get(&key).map_or(0, |v| v.len() as u32)),
-                off_list: list_mode && !listed.contains(&key),
+                off_list: list_mode
+                    && matches!(p.content_type.as_str(), "html" | "redirect")
+                    && !listed.contains(&key),
                 word_count: facts.map(|f| f.word_count),
                 size: p.size,
                 elapsed_ms: p.elapsed_ms,
@@ -573,7 +583,7 @@ pub fn assemble(
         facts_version: data.facts_version,
         throttled: meta.status == CrawlStatus::Throttled,
         external_links: &data.external_links,
-        list_mode: meta.mode == CrawlMode::List,
+        list: (meta.mode == CrawlMode::List).then_some(&meta.list_urls[..]),
         ..CheckInput::new(&data.pages, &links, &data.sitemap, &meta.start_url)
     });
     if let Some(summary) = &siteone {
@@ -1988,8 +1998,9 @@ mod tests {
     fn run_mode(list_mode: bool, sm: &SitemapResult) -> Vec<Finding> {
         let pages = list_pages();
         let links = analyze_links(&pages, START);
+        let listed: Vec<String> = ["/", "/a", "/gone"].iter().map(|p| full(p)).collect();
         run_checks(&CheckInput {
-            list_mode,
+            list: list_mode.then_some(&listed[..]),
             start_content_encoding: Some("gzip"),
             ..CheckInput::new(&pages, &links, sm, START)
         })
@@ -2039,7 +2050,8 @@ mod tests {
 
     #[test]
     fn list_mode_rows_have_no_depth_nor_inlinks_and_mark_off_list_pages() {
-        let pages = list_pages();
+        let mut pages = list_pages();
+        pages.push(other("/img.jpg", 200, "image"));
         let links = analyze_links(&pages, START);
         let listed = [full("/"), full("/a"), full("/gone")];
         let rows = build_rows(&pages, &links, CrawlMode::List, &listed);
@@ -2056,6 +2068,7 @@ mod tests {
                 ("https://x.fr/orphan", true),
                 ("https://x.fr/noindex", true),
                 ("https://x.fr/gone", false),
+                ("https://x.fr/img.jpg", false),
             ]
         );
 
@@ -2063,5 +2076,52 @@ mod tests {
         assert!(rows.iter().all(|r| !r.off_list));
         assert_eq!(rows[0].depth, Some(0));
         assert_eq!(rows[0].inlinks, Some(0));
+    }
+
+    fn run_list(pages: &[PageRecord], list: Option<&[&str]>) -> Vec<Finding> {
+        let links = analyze_links(pages, START);
+        let sm = no_sitemap();
+        let listed: Option<Vec<String>> = list.map(|l| l.iter().map(|p| full(p)).collect());
+        run_checks(&CheckInput {
+            list: listed.as_deref(),
+            ..CheckInput::new(pages, &links, &sm, START)
+        })
+    }
+
+    #[test]
+    fn list_mode_reports_broken_links_only_to_listed_targets() {
+        let pages = vec![html("/").links(&["/old"]).rec(), other("/old", 404, "html")];
+        let broken = |list: Option<&[&str]>| {
+            urls_of(&run_list(&pages, list), FindingCode::BrokenInternalLink)
+        };
+        assert!(broken(Some(&["/"])).is_empty());
+        assert_eq!(broken(Some(&["/", "/old"])), [full("/old")]);
+        assert_eq!(broken(None), [full("/old")]);
+    }
+
+    #[test]
+    fn list_mode_looks_for_duplicates_among_listed_pages_only() {
+        let page = |path: &str| {
+            html(path)
+                .title(Some("Même titre"))
+                .meta(Some("Même meta"))
+                .hash("h")
+        };
+        let pages = vec![page("/a").rec(), page("/b").rec(), page("/hors").rec()];
+        let codes = [
+            FindingCode::TitleDuplicate,
+            FindingCode::MetaDescriptionDuplicate,
+            FindingCode::DuplicateContent,
+        ];
+        for code in codes {
+            let found = |list: Option<&[&str]>| urls_of(&run_list(&pages, list), code.clone());
+            assert!(found(Some(&["/a"])).is_empty(), "{code:?}");
+            assert_eq!(
+                found(Some(&["/a", "/b"])),
+                [full("/a"), full("/b")],
+                "{code:?}"
+            );
+            assert_eq!(found(None).len(), 3, "{code:?}");
+        }
     }
 }
