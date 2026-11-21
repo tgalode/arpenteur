@@ -405,7 +405,7 @@ select {
   padding: 9px 12px 7px;
 }
 
-.urltable-tools input {
+.urltable-tools > input {
   flex: 1;
 }
 
@@ -788,6 +788,10 @@ select {
   gap: 8px;
   padding: 3px 6px;
   cursor: pointer;
+}
+
+.columns-list input {
+  flex: none;
 }
 
 .columns-list label:hover {

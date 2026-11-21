@@ -139,3 +139,46 @@ test("un clic sur l’en-tête poids trie le tableau", async () => {
   const urls = screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0].textContent);
   expect(urls).toEqual(["https://exemple.fr/b", "https://exemple.fr/a"]);
 });
+
+test("masquer la colonne triée retire le tri", async () => {
+  const user = userEvent.setup();
+  localStorage.setItem("arpenteur.columns", JSON.stringify(["url", "size"]));
+  renderTable([
+    row("https://exemple.fr/a", "yes", { size: 90000 }),
+    row("https://exemple.fr/b", "yes", { size: 500 }),
+  ]);
+  const urls = () => screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0].textContent);
+  await user.click(screen.getByRole("columnheader", { name: "poids" }));
+  expect(urls()).toEqual(["https://exemple.fr/b", "https://exemple.fr/a"]);
+  await user.click(screen.getByRole("button", { name: "colonnes" }));
+  await user.click(screen.getByRole("checkbox", { name: "poids" }));
+  expect(urls()).toEqual(["https://exemple.fr/a", "https://exemple.fr/b"]);
+  const sorts = screen.getAllByRole("columnheader").map((h) => h.getAttribute("aria-sort"));
+  expect(sorts).toEqual(["none"]);
+});
+
+test("la barre d’outils garde la recherche en enfant direct et les cases hors de ce sélecteur", async () => {
+  const user = userEvent.setup();
+  const { container } = renderTable([row("https://exemple.fr/a", "yes")]);
+  await user.click(screen.getByRole("button", { name: "colonnes" }));
+  const tools = container.querySelector(".urltable-tools") as HTMLElement;
+  expect(tools.querySelector(":scope > input[type=search]")).not.toBeNull();
+  const boxes = tools.querySelectorAll("input[type=checkbox]");
+  expect(boxes.length).toBeGreaterThan(0);
+  expect(tools.querySelectorAll(":scope > input[type=checkbox]")).toHaveLength(0);
+});
+
+test("sans réponse HTTP, le temps est absent", async () => {
+  const user = userEvent.setup();
+  localStorage.setItem("arpenteur.columns", JSON.stringify(["url", "elapsedMs"]));
+  renderTable([
+    row("https://exemple.fr/a", "yes", { status: -1, elapsedMs: 0 }),
+    row("https://exemple.fr/b", "yes", { status: 200, elapsedMs: 212 }),
+  ]);
+  const times = () => screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[1].textContent);
+  expect(times()).toEqual(["–", "212 ms"]);
+  await user.click(screen.getByRole("columnheader", { name: "temps" }));
+  expect(times()).toEqual(["212 ms", "–"]);
+  await user.click(screen.getByRole("columnheader", { name: "temps" }));
+  expect(times()).toEqual(["212 ms", "–"]);
+});

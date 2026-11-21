@@ -140,3 +140,11 @@ describe("formats du tableau", () => {
     expect(formatMs(212)).toBe("212 ms");
   });
 });
+
+describe("temps de réponse absent", () => {
+  test("sans réponse HTTP, le tri met le temps en dernier dans les deux sens", () => {
+    const rows = [row({ status: -1, elapsedMs: 0 }), row({ elapsedMs: 300 }), row({ elapsedMs: 10 })];
+    expect(sortRows(rows, "elapsedMs", "asc").map((r) => r.elapsedMs)).toEqual([10, 300, 0]);
+    expect(sortRows(rows, "elapsedMs", "desc").map((r) => r.elapsedMs)).toEqual([300, 10, 0]);
+  });
+});

@@ -27,6 +27,11 @@ export function formatSizeKo(bytes: number): string {
   return `${ko} Ko`;
 }
 
+/** Sans réponse HTTP (statut négatif), il n'y a pas de temps de réponse. */
+export function responseMs(r: UrlRow): number | null {
+  return r.status >= 0 ? r.elapsedMs : null;
+}
+
 export function formatMs(ms: number): string {
   return `${ms} ms`;
 }
@@ -56,8 +61,8 @@ function compare(a: string | number, b: string | number, key?: keyof UrlRow): nu
 export function sortRows(rows: UrlRow[], key: keyof UrlRow, dir: "asc" | "desc"): UrlRow[] {
   const sign = dir === "asc" ? 1 : -1;
   return [...rows].sort((x, y) => {
-    const a = x[key];
-    const b = y[key];
+    const a = key === "elapsedMs" ? responseMs(x) : x[key];
+    const b = key === "elapsedMs" ? responseMs(y) : y[key];
     const aNull = a === null || a === undefined;
     const bNull = b === null || b === undefined;
     if (aNull && bNull) return 0;

@@ -145,3 +145,11 @@ test("problemsCsv ne modifie pas la liste reçue", () => {
   problemsCsv(findings);
   expect(findings.map((f) => f.code)).toEqual(["canonicalMissing", "titleMissing"]);
 });
+
+test("le temps est vide sans réponse HTTP et brut sinon", () => {
+  const cell = (r: UrlRow) => urlsCsv([r]).slice(1).split("\r\n")[1].split(";")[15];
+  expect(cell(row({ status: -1, elapsedMs: 0 }))).toBe("");
+  expect(cell(row({ status: -6, elapsedMs: 0 }))).toBe("");
+  expect(cell(row({ status: 200, elapsedMs: 212 }))).toBe("212");
+  expect(cell(row({ status: 404, elapsedMs: 0 }))).toBe("0");
+});

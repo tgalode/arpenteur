@@ -1,6 +1,6 @@
 import { t } from "../i18n/fr";
 import type { ColumnKey } from "./columns";
-import { formatMs, formatSizeKo, httpTone, indexableText, indexableTone, statusText } from "./table";
+import { formatMs, formatSizeKo, httpTone, indexableText, indexableTone, responseMs, statusText } from "./table";
 import type { UrlRow } from "./types";
 
 export type UrlColumn = {
@@ -150,9 +150,10 @@ const FIELD_COLUMNS: Record<ColumnKey, Omit<UrlColumn, "key">> = {
     label: t("col_elapsedMs"),
     csvLabel: t("csvcol_elapsedMs"),
     width: "calc(9ch + 18px)",
-    render: (r) => formatMs(r.elapsedMs),
-    csv: (r) => r.elapsedMs,
+    render: (r) => (responseMs(r) === null ? t("none") : formatMs(r.elapsedMs)),
+    csv: responseMs,
     numeric: true,
+    tone: (r) => dimIfEmpty(responseMs(r)),
   },
 };
 
