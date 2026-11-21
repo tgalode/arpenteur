@@ -906,25 +906,13 @@ fn ext_url(site: &support::FixtureSite, path: &str) -> Url {
     Url::parse(&format!("http://localhost:{port}{path}")).unwrap()
 }
 
-async fn check_from(
-    start: &str,
-    targets: &[Url],
-    budget: usize,
-    interval: Duration,
-    cancel: &CancellationToken,
-) -> (Vec<arpenteur_core::model::ExternalCheck>, usize) {
-    let start = Url::parse(start).unwrap();
-    check_external_links(&ext_client(), &start, targets, budget, interval, cancel).await
-}
-
-/// Site audité dont le nom se résout (adresse IP littérale).
 async fn check(
     targets: &[Url],
     budget: usize,
     interval: Duration,
     cancel: &CancellationToken,
 ) -> (Vec<arpenteur_core::model::ExternalCheck>, usize) {
-    check_from("http://127.0.0.1/", targets, budget, interval, cancel).await
+    check_external_links(&ext_client(), targets, budget, interval, cancel).await
 }
 
 fn outcome_of(
@@ -1083,69 +1071,55 @@ async fn each_external_url_is_requested_once() {
     assert_eq!(site.count("/robots.txt"), 0);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn unknown_domain_is_broken_after_a_second_try() {
-    let url = Url::parse("https://domaine-inexistant.invalid/").unwrap();
-    let (checks, used) = check(
-        std::slice::from_ref(&url),
-        10,
-        Duration::ZERO,
-        &CancellationToken::new(),
-    )
-    .await;
-    assert_eq!(used, 2);
-    let c = outcome_of(&checks, &url);
-    assert_eq!(
-        (c.outcome, c.status, c.final_url),
-        (ExternalOutcome::Broken, None, None)
-    );
-
-    // Le budget ne paie pas le second essai : jamais « cassé » sur une seule résolution ratée.
-    let (checks, used) = check(
-        std::slice::from_ref(&url),
-        1,
-        Duration::ZERO,
-        &CancellationToken::new(),
-    )
-    .await;
-    assert_eq!(used, 1);
-    assert_eq!(outcome_of(&checks, &url).outcome, ExternalOutcome::Unknown);
+fn gone(name: &str) -> Url {
+    Url::parse(&format!("https://{name}.invalid/")).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn unresolvable_control_host_makes_dns_failures_unknown() {
-    let gone = |n: &str| Url::parse(&format!("https://{n}.invalid/")).unwrap();
+async fn vanished_domain_is_unknown_when_nothing_else_answered() {
     let targets = [gone("domaine-inexistant"), gone("autre-domaine")];
-    let (checks, used) = check_from(
-        "https://autre-inexistant.invalid/",
-        &targets,
-        10,
-        Duration::ZERO,
-        &CancellationToken::new(),
-    )
-    .await;
-    // Premier lien : deux essais puis un contrôle raté. Second lien : une seule requête.
-    assert_eq!(used, 3);
-    assert_eq!(checks.len(), 2);
+    let (checks, used) = check(&targets, 10, Duration::ZERO, &CancellationToken::new()).await;
+    assert_eq!((checks.len(), used), (2, 4));
     for c in &checks {
         assert_eq!(
-            (c.outcome, c.status),
-            (ExternalOutcome::Unknown, None),
+            (c.outcome, c.status, c.final_url.clone()),
+            (ExternalOutcome::Unknown, None, None),
             "{}",
             c.url
         );
     }
+}
 
-    // Site audité sans hôte (ex. fichier) : pas de contrôle possible, jamais « cassé ».
-    let (checks, _) = check_from(
-        "mailto:a@exemple.fr",
-        &targets[..1],
-        10,
-        Duration::ZERO,
-        &CancellationToken::new(),
-    )
-    .await;
-    assert_eq!(checks[0].outcome, ExternalOutcome::Unknown);
+#[tokio::test(flavor = "multi_thread")]
+async fn vanished_domain_is_broken_when_another_target_answered() {
+    let site = start_fixture_site(Variant::ExternalLinks).await;
+    let dead = gone("domaine-inexistant");
+    let answering = ext_url(&site, "/ext-404");
+    // Ni l'ordre ni le statut de la cible qui répond ne comptent.
+    for targets in [
+        vec![dead.clone(), answering.clone()],
+        vec![answering.clone(), dead.clone()],
+        vec![dead.clone(), ext_url(&site, "/ext-403")],
+    ] {
+        let (checks, used) = check(&targets, 10, Duration::ZERO, &CancellationToken::new()).await;
+        assert_eq!((checks.len(), used), (2, 3));
+        let c = outcome_of(&checks, &dead);
+        assert_eq!(
+            (c.outcome, c.status, c.final_url),
+            (ExternalOutcome::Broken, None, None)
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn single_dns_failure_is_never_broken() {
+    let site = start_fixture_site(Variant::ExternalLinks).await;
+    let dead = gone("domaine-inexistant");
+    // Budget de 2 : un seul essai pour la cible morte, même si l'autre répond.
+    let targets = [ext_url(&site, "/ext-ok"), dead.clone()];
+    let (checks, used) = check(&targets, 2, Duration::ZERO, &CancellationToken::new()).await;
+    assert_eq!(used, 2);
+    assert_eq!(outcome_of(&checks, &dead).outcome, ExternalOutcome::Unknown);
 }
 
 #[tokio::test(flavor = "multi_thread")]

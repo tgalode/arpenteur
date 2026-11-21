@@ -222,7 +222,6 @@ pub async fn run_post_crawl_probes(
         let targets = external_targets(pages, env.start);
         (external, _) = check_external_links(
             client,
-            env.start,
             &targets,
             budget,
             env.min_interval,

@@ -95,23 +95,15 @@ fn dns_chain(messages: impl Iterator<Item = String>) -> bool {
         if message == "dns error" {
             dns = true;
         }
-        if message.contains("temporary failure") || message.contains("try again") {
+        // 11002 : WSATRY_AGAIN sous Windows, dont le texte dit « temporary error ».
+        if message.contains("temporary")
+            || message.contains("try again")
+            || message.contains("11002")
+        {
             return false;
         }
     }
     dns
-}
-
-/// « dns error » couvre aussi une machine hors ligne ou un résolveur en panne : avant de
-/// conclure qu'un domaine a disparu, on vérifie que le nom du site audité, lui, se résout.
-async fn resolver_works(start: &Url, cancel: &CancellationToken) -> bool {
-    let (Some(host), Some(port)) = (start.host_str(), start.port_or_known_default()) else {
-        return false;
-    };
-    tokio::select! {
-        r = tokio::net::lookup_host((host, port)) => r.is_ok_and(|mut a| a.next().is_some()),
-        _ = cancel.cancelled() => false,
-    }
 }
 
 enum Attempt {
@@ -157,11 +149,12 @@ fn check_of(
 }
 
 /// Renvoie les vérifications faites et le nombre de requêtes consommées (au plus `budget`).
-/// `start` sert de témoin : son nom doit se résoudre pour qu'un domaine introuvable soit « cassé ».
+/// Une cible dont les deux essais échouent sur le DNS est mise de côté : elle est « cassée »
+/// seulement si une autre cible a reçu une réponse HTTP pendant ce run (preuve que les noms
+/// externes se résolvent), sinon « inconnue ».
 /// Une cible absente du résultat n'a pas été vérifiée (budget épuisé ou annulation).
 pub async fn check_external_links(
     client: &reqwest::Client,
-    start: &Url,
     targets: &[Url],
     budget: usize,
     min_interval: Duration,
@@ -169,32 +162,27 @@ pub async fn check_external_links(
 ) -> (Vec<ExternalCheck>, usize) {
     let mut checks = Vec::new();
     let mut used = 0;
-    let mut resolver_unreliable = false;
+    let mut answered = false;
+    let mut vanished = Vec::new();
     for url in targets {
         if used >= budget || !wait_turn(min_interval, cancel).await {
             break;
         }
         used += 1;
         let mut result = attempt(client, url, cancel).await;
-        if matches!(result, Attempt::DnsFailure) && used < budget && !resolver_unreliable {
+        if matches!(result, Attempt::DnsFailure) && used < budget {
             if !wait_turn(min_interval, cancel).await {
                 break;
             }
             used += 1;
             result = attempt(client, url, cancel).await;
             if matches!(result, Attempt::DnsFailure) {
-                if resolver_works(start, cancel).await {
-                    checks.push(check_of(url, ExternalOutcome::Broken, None, None));
-                    continue;
-                }
-                if cancel.is_cancelled() {
-                    break;
-                }
-                resolver_unreliable = true;
+                vanished.push(checks.len());
             }
         }
         checks.push(match result {
             Attempt::Answered(status, last) => {
+                answered = true;
                 check_of(url, classify_status(status), Some(status), Some(last))
             }
             Attempt::DnsFailure | Attempt::Failed => {
@@ -202,6 +190,11 @@ pub async fn check_external_links(
             }
             Attempt::Cancelled => break,
         });
+    }
+    if answered {
+        for index in vanished {
+            checks[index].outcome = ExternalOutcome::Broken;
+        }
     }
     (checks, used)
 }
@@ -237,5 +230,10 @@ mod tests {
             "failed to lookup address information: Temporary failure in name resolution"
         ]));
         assert!(!chain(&["dns error", "Try again later"]));
+        assert!(!chain(&[
+            "dns error",
+            "This is usually a temporary error during hostname resolution (os error 11002)"
+        ]));
+        assert!(!chain(&["dns error", "lookup failed (os error 11002)"]));
     }
 }
