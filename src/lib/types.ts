@@ -149,11 +149,24 @@ export interface UrlRow {
   h1Count: number;
   canonical: string | null;
   indexable: Indexability;
+  /** null en mode liste. */
   depth: number | null;
-  inlinks: number;
+  /** null en mode liste. */
+  inlinks: number | null;
+  /** Mode liste : adresse atteinte par une redirection, absente de la liste. */
+  offList: boolean;
   wordCount: number | null;
   size: number | null;
   elapsedMs: number;
+}
+
+export type CrawlMode = "site" | "list";
+
+export type SkipReason = "robots" | "pattern";
+
+export interface SkippedUrl {
+  url: string;
+  reason: SkipReason;
 }
 
 export interface CrawlMeta {
@@ -165,6 +178,9 @@ export interface CrawlMeta {
   status: CrawlStatus;
   settings: CrawlSettings;
   pages: number;
+  mode: CrawlMode;
+  /** Mode liste : la liste nettoyée, adresses écartées comprises. */
+  listUrls: string[];
 }
 
 export interface SiteSummary {
@@ -189,6 +205,7 @@ export interface CrawlResult {
   sitemap: SitemapResult;
   externalLinks: ExternalCheck[];
   externalUnchecked: number;
+  listSkipped: SkippedUrl[];
 }
 
 export interface StartedCrawl {

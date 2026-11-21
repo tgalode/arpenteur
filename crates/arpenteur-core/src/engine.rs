@@ -77,11 +77,14 @@ use crate::canonical_probe::{ProbeEnv, probe_client, run_post_crawl_probes};
 use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
 use crate::external_links::external_client;
 use crate::model::{
-    CollectedData, CrawlLocation, CrawlMeta, CrawlSettings, CrawlStatus, FACTS_VERSION,
-    SitemapResult,
+    CollectedData, CrawlLocation, CrawlMeta, CrawlMode, CrawlSettings, CrawlStatus, FACTS_VERSION,
+    SitemapResult, SkippedUrl,
 };
-use crate::settings::{CrawlError, UrlFilter, build_core_options, crawl_seeds, plain_user_agent};
-use crate::sitemap::discover;
+use crate::settings::{
+    CrawlError, UrlFilter, build_core_options, build_list_core_options, crawl_seeds,
+    plain_user_agent,
+};
+use crate::sitemap::{discover, read_robots_txt};
 use crate::storage::CrawlStore;
 
 /// Code de sortie de `Manager::run` (manager.rs, `run_post_crawl`) quand aucune
@@ -89,6 +92,48 @@ use crate::storage::CrawlStore;
 const NO_PAGE_LOADED: i32 = 3;
 const NO_PAGE_LOADED_MESSAGE: &str =
     "Aucune page n'a pu être chargée. Vérifiez l'adresse ou la connexion.";
+const EMPTY_LIST_MESSAGE: &str = "La liste est vide.";
+const ALL_SKIPPED_MESSAGE: &str =
+    "Toutes les adresses de la liste sont interdites par robots.txt ou exclues par les motifs.";
+
+/// Ce que le crawl explore : un site à partir d'une adresse, ou une liste d'adresses
+/// d'un même site, sans suivre les liens ni lire le sitemap.
+pub enum CrawlTarget {
+    Site(Url),
+    List(Vec<Url>),
+}
+
+impl CrawlTarget {
+    /// L'adresse qui nomme le crawl : la première de la liste telle que donnée.
+    fn first(&self) -> Option<&Url> {
+        match self {
+            CrawlTarget::Site(start) => Some(start),
+            CrawlTarget::List(urls) => urls.first(),
+        }
+    }
+}
+
+struct Executed {
+    status: CrawlStatus,
+    handle: Option<CollectorHandle>,
+    sitemap: SitemapResult,
+    list_skipped: Vec<SkippedUrl>,
+}
+
+impl Executed {
+    fn new(status: CrawlStatus) -> Executed {
+        Executed {
+            status,
+            handle: None,
+            sitemap: SitemapResult::default(),
+            list_skipped: Vec::new(),
+        }
+    }
+
+    fn failed(message: String) -> Executed {
+        Executed::new(CrawlStatus::Failed { message })
+    }
+}
 
 fn http_client(settings: &CrawlSettings) -> Result<reqwest::Client, CrawlError> {
     reqwest::Client::builder()
@@ -109,50 +154,79 @@ fn sitemap_budget(settings: &CrawlSettings) -> Result<(Duration, usize), CrawlEr
     ))
 }
 
-/// Découverte du sitemap puis crawl SiteOne ; renvoie le statut final et les pages collectées.
+/// Préparation (sitemap, ou robots.txt et filtre de la liste) puis crawl SiteOne.
 async fn execute(
     settings: &CrawlSettings,
-    start: &Url,
+    target: &CrawlTarget,
     location: &CrawlLocation,
     events: Arc<dyn CrawlEvents>,
     cancel: &CancellationToken,
-) -> (CrawlStatus, Option<CollectorHandle>, SitemapResult) {
+) -> Executed {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let prepared = http_client(settings).and_then(|client| Ok((client, sitemap_budget(settings)?)));
     let (client, (min_interval, max_urls)) = match prepared {
         Ok(p) => p,
-        Err(e) => {
-            return (
-                CrawlStatus::Failed {
-                    message: e.to_string(),
-                },
-                None,
-                SitemapResult::default(),
-            );
+        Err(e) => return Executed::failed(e.to_string()),
+    };
+
+    let mut executed = Executed::new(CrawlStatus::Running);
+    let options = match target {
+        CrawlTarget::Site(start) => {
+            executed.sitemap = tokio::select! {
+                s = discover(&client, start, min_interval, max_urls) => s,
+                _ = cancel.cancelled() => return Executed::new(CrawlStatus::Stopped),
+            };
+            if cancel.is_cancelled() {
+                executed.status = CrawlStatus::Stopped;
+                return executed;
+            }
+            // Les URL écartées restent dans `sitemap.urls` : le contenu du sitemap est un fait.
+            let seeds = crawl_seeds(settings, &executed.sitemap);
+            build_core_options(settings, start, &location.dir, seeds)
+        }
+        CrawlTarget::List(urls) => {
+            let Some(first) = urls.first() else {
+                return Executed::failed(EMPTY_LIST_MESSAGE.to_string());
+            };
+            let robots_txt = tokio::select! {
+                r = read_robots_txt(&client, first) => r,
+                _ = cancel.cancelled() => return Executed::new(CrawlStatus::Stopped),
+            };
+            let filter = UrlFilter::new(settings, robots_txt.as_deref());
+            executed.sitemap = SitemapResult {
+                robots_txt,
+                ..SitemapResult::default()
+            };
+            let mut allowed = Vec::new();
+            for url in urls {
+                match filter.check(url.as_str()) {
+                    Ok(()) => allowed.push(url),
+                    Err(reason) => executed.list_skipped.push(SkippedUrl {
+                        url: url.to_string(),
+                        reason,
+                    }),
+                }
+            }
+            // SiteOne demande toujours son URL de départ sans la filtrer : ce sera la première
+            // adresse autorisée.
+            let Some((start, rest)) = allowed.split_first() else {
+                executed.status = CrawlStatus::Failed {
+                    message: ALL_SKIPPED_MESSAGE.to_string(),
+                };
+                return executed;
+            };
+            let rest = rest.iter().map(|u| u.to_string()).collect();
+            build_list_core_options(settings, start, &location.dir, rest)
         }
     };
-
-    let sitemap = tokio::select! {
-        s = discover(&client, start, min_interval, max_urls) => s,
-        _ = cancel.cancelled() => return (CrawlStatus::Stopped, None, SitemapResult::default()),
-    };
-    if cancel.is_cancelled() {
-        return (CrawlStatus::Stopped, None, sitemap);
-    }
-
-    // Les URL écartées restent dans `sitemap.urls` : le contenu du sitemap est un fait.
-    let seeds = crawl_seeds(settings, &sitemap);
-    let options = match build_core_options(settings, start, &location.dir, seeds) {
+    let options = match options {
         Ok(o) => o,
         Err(e) => {
-            return (
-                CrawlStatus::Failed {
-                    message: e.to_string(),
-                },
-                None,
-                sitemap,
-            );
+            executed.status = CrawlStatus::Failed {
+                message: e.to_string(),
+            };
+            return executed;
         }
     };
     let mut am = siteone_crawler::analysis::manager::AnalysisManager::new();
@@ -163,20 +237,18 @@ async fn execute(
     let mut manager = match Manager::new(options, am) {
         Ok(m) => m,
         Err(e) => {
-            return (
-                CrawlStatus::Failed {
-                    message: e.to_string(),
-                },
-                Some(handle),
-                sitemap,
-            );
+            executed.status = CrawlStatus::Failed {
+                message: e.to_string(),
+            };
+            executed.handle = Some(handle);
+            return executed;
         }
     };
 
     // Annuler le futur arrête la boucle de SiteOne : une URL = une tâche déjà lancée,
     // donc au plus `workers` requêtes en vol se terminent, aucune nouvelle ne part.
     // `biased` : l'annulation est vue avant que la boucle ne lance une autre tâche.
-    let status = tokio::select! {
+    executed.status = tokio::select! {
         biased;
         _ = cancel.cancelled() => if handle.was_throttled() {
             CrawlStatus::Throttled
@@ -191,49 +263,61 @@ async fn execute(
             Err(e) => CrawlStatus::Failed { message: e.to_string() },
         },
     };
-    (status, Some(handle), sitemap)
+    executed.handle = Some(handle);
+    executed
 }
 
 /// Ne renvoie jamais d'erreur : un échec devient `CrawlStatus::Failed`.
 pub async fn run_crawl(
     settings: CrawlSettings,
-    start: Url,
+    target: CrawlTarget,
     store: CrawlStore,
     location: CrawlLocation,
     events: Arc<dyn CrawlEvents>,
     cancel: CancellationToken,
 ) -> CrawlMeta {
+    let (mode, list_urls) = match &target {
+        CrawlTarget::Site(_) => (CrawlMode::Site, Vec::new()),
+        CrawlTarget::List(urls) => (CrawlMode::List, urls.iter().map(Url::to_string).collect()),
+    };
     let mut meta = CrawlMeta {
         id: location.id.clone(),
         domain: location.domain.clone(),
-        start_url: start.as_str().to_string(),
+        start_url: target.first().map(Url::to_string).unwrap_or_default(),
         started_at: chrono::Local::now().to_rfc3339(),
         finished_at: None,
         status: CrawlStatus::Running,
         settings: settings.clone(),
         pages: 0,
+        mode,
+        list_urls,
     };
     let write_failure = |e: std::io::Error| CrawlStatus::Failed {
         message: format!("Écriture impossible : {e}"),
     };
     let initial_write = store.write_meta(&location, &meta);
 
-    let (status, handle, sitemap) = match initial_write {
-        Err(e) => (write_failure(e), None, SitemapResult::default()),
-        Ok(()) => execute(&settings, &start, &location, events, &cancel).await,
+    let Executed {
+        status,
+        handle,
+        sitemap,
+        list_skipped,
+    } = match initial_write {
+        Err(e) => Executed::new(write_failure(e)),
+        Ok(()) => execute(&settings, &target, &location, events, &cancel).await,
     };
 
     let mut pages = handle.map(|h| h.pages()).unwrap_or_default();
     let mut start_content_encoding = None;
     let (mut external_links, mut external_unchecked) = (Vec::new(), 0);
-    if status == CrawlStatus::Completed {
+    if let (CrawlStatus::Completed, Some(start)) = (&status, target.first()) {
         // Après un crawl terminé seulement, au même débit et dans la même limite.
         if let Ok((min_interval, _)) = sitemap_budget(&settings) {
             if let Ok(client) = probe_client(&plain_user_agent(&settings)) {
                 let filter = UrlFilter::new(&settings, sitemap.robots_txt.as_deref());
                 let env = ProbeEnv {
                     client: &client,
-                    start: &start,
+                    start,
                     filter: &filter,
                     min_interval,
                     cancel: &cancel,
@@ -269,6 +353,7 @@ pub async fn run_crawl(
             start_content_encoding,
             external_links,
             external_unchecked,
+            list_skipped,
         },
     ) {
         meta.status = write_failure(e);

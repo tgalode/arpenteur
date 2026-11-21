@@ -19,6 +19,7 @@ function row(url: string, indexable: Indexability, over: Partial<UrlRow> = {}): 
     indexable,
     depth: 0,
     inlinks: 0,
+    offList: false,
     wordCount: null,
     size: null,
     elapsedMs: 0,

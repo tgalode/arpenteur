@@ -40,6 +40,8 @@ function meta(status: CrawlStatus, id = "abc"): CrawlMeta {
       limitThreshold: 5,
     },
     pages: 2,
+    mode: "site",
+    listUrls: [],
   };
 }
 
@@ -58,6 +60,7 @@ function row(url: string, over: Partial<UrlRow> = {}): UrlRow {
     indexable: "yes",
     depth: 0,
     inlinks: 0,
+    offList: false,
     wordCount: 10,
     size: null,
     elapsedMs: 0,
@@ -109,6 +112,7 @@ function result(status: CrawlStatus): CrawlResult {
     sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [], robotsTxt: null },
     externalLinks: [],
     externalUnchecked: 0,
+    listSkipped: [],
   };
 }
 

@@ -108,6 +108,23 @@ impl Fetcher<'_> {
     }
 }
 
+/// Corps du robots.txt du site, sans lire le moindre sitemap ; `None` s'il est absent ou illisible.
+pub async fn read_robots_txt(client: &reqwest::Client, start: &Url) -> Option<String> {
+    let robots_url = Url::parse(&format!(
+        "{}/robots.txt",
+        start.origin().ascii_serialization()
+    ))
+    .ok()?;
+    let mut fetcher = Fetcher {
+        client,
+        min_interval: Duration::ZERO,
+        first: true,
+        max_bytes: MAX_FILE_BYTES,
+    };
+    let fetched = fetcher.get(&robots_url).await.ok()?;
+    Some(String::from_utf8_lossy(&fetched.body).into_owned())
+}
+
 pub async fn discover(
     client: &reqwest::Client,
     start: &Url,

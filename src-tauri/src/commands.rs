@@ -2,8 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arpenteur_core::defaults::validate_settings;
-use arpenteur_core::engine::run_crawl;
-use arpenteur_core::model::{CrawlMeta, CrawlResult, CrawlSettings, CrawlStatus, SiteSummary};
+use arpenteur_core::engine::{CrawlTarget, run_crawl};
+use arpenteur_core::model::{
+    CrawlMeta, CrawlMode, CrawlResult, CrawlSettings, CrawlStatus, SiteSummary,
+};
 use arpenteur_core::settings::normalize_start_url;
 use arpenteur_core::storage::domain_key;
 use chrono::Local;
@@ -57,7 +59,7 @@ pub fn start_crawl(
         let _guard = FinishGuard(&state, run_id);
         let inner = tauri::async_runtime::spawn(run_crawl(
             settings.clone(),
-            start.clone(),
+            CrawlTarget::Site(start.clone()),
             store.clone(),
             location.clone(),
             events,
@@ -77,6 +79,8 @@ pub fn start_crawl(
                     },
                     settings,
                     pages: 0,
+                    mode: CrawlMode::Site,
+                    list_urls: Vec::new(),
                 };
                 let _ = store.write_meta(&location, &meta);
                 meta

@@ -5,7 +5,7 @@ use url::Url;
 
 use crate::links::analyze_links;
 use crate::model::{
-    CollectedData, CrawlMeta, CrawlResult, CrawlStatus, ExternalCheck, ExternalOutcome,
+    CollectedData, CrawlMeta, CrawlMode, CrawlResult, CrawlStatus, ExternalCheck, ExternalOutcome,
     FACTS_VERSION, Finding, FindingCode, Indexability, LinkReport, PageFacts, PageRecord,
     SitemapResult, UrlRow,
 };
@@ -145,6 +145,8 @@ pub struct CheckInput<'a> {
     /// Crawl limité par le serveur : ses 503 et 429 ne sont pas des erreurs du site.
     pub throttled: bool,
     pub external_links: &'a [ExternalCheck],
+    /// Mode liste : les contrôles qui ont besoin du site entier ne tournent pas.
+    pub list_mode: bool,
 }
 
 impl<'a> CheckInput<'a> {
@@ -163,6 +165,7 @@ impl<'a> CheckInput<'a> {
             facts_version: FACTS_VERSION,
             throttled: false,
             external_links: &[],
+            list_mode: false,
         }
     }
 }
@@ -177,6 +180,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
         facts_version,
         throttled,
         external_links,
+        list_mode,
     } = *input;
     let start = Url::parse(&norm(start_url)).ok();
     let is_internal = |raw: &str| match (&start, Url::parse(&norm(raw))) {
@@ -378,7 +382,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
 
     let start_norm = norm(start_url);
     let sitemap_urls: BTreeSet<String> = sitemap.urls.iter().map(|u| norm(u)).collect();
-    if sitemap.found {
+    if !list_mode && sitemap.found {
         for url in &sitemap_urls {
             let Some(page) = by_url.get(url) else {
                 continue;
@@ -403,7 +407,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
                 push(FindingCode::NotInSitemap, &page.url, vec![], None);
             }
         }
-    } else {
+    } else if !list_mode {
         push(FindingCode::SitemapNotFound, start_url, vec![], None);
     }
 
@@ -515,7 +519,14 @@ fn canonical_finding(
     Some((code, vec![canonical.to_string()]))
 }
 
-pub fn build_rows(pages: &[PageRecord], links: &LinkReport) -> Vec<UrlRow> {
+pub fn build_rows(
+    pages: &[PageRecord],
+    links: &LinkReport,
+    mode: CrawlMode,
+    list_urls: &[String],
+) -> Vec<UrlRow> {
+    let list_mode = mode == CrawlMode::List;
+    let listed: BTreeSet<String> = list_urls.iter().map(|u| norm(u)).collect();
     pages
         .iter()
         .map(|p| {
@@ -535,8 +546,14 @@ pub fn build_rows(pages: &[PageRecord], links: &LinkReport) -> Vec<UrlRow> {
                 h1_count: facts.map_or(0, |f| f.h1.len() as u32),
                 canonical: facts.and_then(|f| f.canonical.clone()),
                 indexable: indexability(p),
-                depth: links.depth.get(&key).copied(),
-                inlinks: links.inlinks.get(&key).map_or(0, |v| v.len() as u32),
+                depth: if list_mode {
+                    None
+                } else {
+                    links.depth.get(&key).copied()
+                },
+                inlinks: (!list_mode)
+                    .then(|| links.inlinks.get(&key).map_or(0, |v| v.len() as u32)),
+                off_list: list_mode && !listed.contains(&key),
                 word_count: facts.map(|f| f.word_count),
                 size: p.size,
                 elapsed_ms: p.elapsed_ms,
@@ -556,12 +573,13 @@ pub fn assemble(
         facts_version: data.facts_version,
         throttled: meta.status == CrawlStatus::Throttled,
         external_links: &data.external_links,
+        list_mode: meta.mode == CrawlMode::List,
         ..CheckInput::new(&data.pages, &links, &data.sitemap, &meta.start_url)
     });
     if let Some(summary) = &siteone {
         findings.extend(site_findings(summary, &meta.start_url));
     }
-    let rows = build_rows(&data.pages, &links);
+    let rows = build_rows(&data.pages, &links, meta.mode, &meta.list_urls);
     CrawlResult {
         meta,
         rows,
@@ -571,6 +589,7 @@ pub fn assemble(
         sitemap: data.sitemap,
         external_links: data.external_links,
         external_unchecked: data.external_unchecked,
+        list_skipped: data.list_skipped,
     }
 }
 
@@ -1121,16 +1140,16 @@ mod tests {
             other("/gone", 404, ""),
         ];
         let links = analyze_links(&pages, START);
-        let rows = build_rows(&pages, &links);
+        let rows = build_rows(&pages, &links, CrawlMode::Site, &[]);
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].url, full("/"));
         assert_eq!(rows[0].depth, Some(0));
-        assert_eq!(rows[0].inlinks, 0);
+        assert_eq!(rows[0].inlinks, Some(0));
         assert_eq!(rows[0].h1.as_deref(), Some("h"));
         assert_eq!(rows[0].h1_count, 1);
         assert_eq!(rows[0].indexable, Indexability::Yes);
         assert_eq!(rows[1].depth, Some(1));
-        assert_eq!(rows[1].inlinks, 1);
+        assert_eq!(rows[1].inlinks, Some(1));
         assert_eq!(rows[1].word_count, Some(300));
         assert_eq!(rows[2].word_count, None);
         assert_eq!(rows[2].depth, None);
@@ -1148,7 +1167,7 @@ mod tests {
             html("/c").title(Some("   ")).rec(),
         ];
         let links = analyze_links(&pages, START);
-        let rows = build_rows(&pages, &links);
+        let rows = build_rows(&pages, &links, CrawlMode::Site, &[]);
         assert_eq!(rows[0].title_length, Some(3));
         assert_eq!(rows[0].meta_description_length, Some(5));
         assert_eq!(rows[1].title_length, None);
@@ -1941,5 +1960,108 @@ mod tests {
         let shared: Vec<String> =
             serde_json::from_str(include_str!("../../../src/lib/finding-codes.json")).unwrap();
         assert_eq!(serialized, shared);
+    }
+
+    const SITE_WIDE: [FindingCode; 5] = [
+        FindingCode::OrphanPage,
+        FindingCode::NotInSitemap,
+        FindingCode::SitemapNotFound,
+        FindingCode::SitemapUrlError,
+        FindingCode::SitemapUrlNonIndexable,
+    ];
+
+    /// Une liste de quatre adresses : `/` et `/a` (même titre, `/a` lie une page hors liste et
+    /// une page en 404 de la liste), `/orphan` et `/noindex`, plus `/gone` en 404.
+    fn list_pages() -> Vec<PageRecord> {
+        vec![
+            html("/").title(Some("Même titre")).rec(),
+            html("/a")
+                .title(Some("Même titre"))
+                .links(&["/hors-liste", "/gone"])
+                .rec(),
+            html("/orphan").rec(),
+            html("/noindex").robots("noindex").rec(),
+            other("/gone", 404, "html"),
+        ]
+    }
+
+    fn run_mode(list_mode: bool, sm: &SitemapResult) -> Vec<Finding> {
+        let pages = list_pages();
+        let links = analyze_links(&pages, START);
+        run_checks(&CheckInput {
+            list_mode,
+            start_content_encoding: Some("gzip"),
+            ..CheckInput::new(&pages, &links, sm, START)
+        })
+    }
+
+    #[test]
+    fn list_mode_skips_site_wide_checks() {
+        let found = sitemap(&["/", "/orphan", "/noindex", "/gone", "/absente-du-crawl"]);
+        for sm in [found, no_sitemap()] {
+            let f = run_mode(true, &sm);
+            for code in SITE_WIDE {
+                assert!(of(&f, code.clone()).is_empty(), "{code:?}");
+            }
+            // Les doublons se cherchent parmi les pages de la liste.
+            assert_eq!(
+                urls_of(&f, FindingCode::TitleDuplicate),
+                [full("/"), full("/a")]
+            );
+            // Seule une cible demandée peut être cassée : `/hors-liste` n'a jamais été demandée.
+            assert_eq!(
+                urls_of(&f, FindingCode::BrokenInternalLink),
+                [full("/gone")]
+            );
+            // Les constats de serveur restent.
+            assert_eq!(of(&f, FindingCode::SecurityHeadersMissing).len(), 1);
+            assert_eq!(of(&f, FindingCode::ModernCompressionMissing).len(), 1);
+        }
+    }
+
+    #[test]
+    fn site_mode_keeps_them() {
+        let found = sitemap(&["/", "/orphan", "/noindex", "/gone"]);
+        let f = run_mode(false, &found);
+        assert_eq!(
+            urls_of(&f, FindingCode::OrphanPage),
+            [full("/noindex"), full("/orphan")]
+        );
+        assert_eq!(urls_of(&f, FindingCode::NotInSitemap), [full("/a")]);
+        assert_eq!(urls_of(&f, FindingCode::SitemapUrlError), [full("/gone")]);
+        assert_eq!(
+            urls_of(&f, FindingCode::SitemapUrlNonIndexable),
+            [full("/noindex")]
+        );
+        let f = run_mode(false, &no_sitemap());
+        assert_eq!(urls_of(&f, FindingCode::SitemapNotFound), [START]);
+    }
+
+    #[test]
+    fn list_mode_rows_have_no_depth_nor_inlinks_and_mark_off_list_pages() {
+        let pages = list_pages();
+        let links = analyze_links(&pages, START);
+        let listed = [full("/"), full("/a"), full("/gone")];
+        let rows = build_rows(&pages, &links, CrawlMode::List, &listed);
+        assert!(
+            rows.iter()
+                .all(|r| r.depth.is_none() && r.inlinks.is_none())
+        );
+        let off: Vec<(&str, bool)> = rows.iter().map(|r| (r.url.as_str(), r.off_list)).collect();
+        assert_eq!(
+            off,
+            [
+                ("https://x.fr/", false),
+                ("https://x.fr/a", false),
+                ("https://x.fr/orphan", true),
+                ("https://x.fr/noindex", true),
+                ("https://x.fr/gone", false),
+            ]
+        );
+
+        let rows = build_rows(&pages, &links, CrawlMode::Site, &[]);
+        assert!(rows.iter().all(|r| !r.off_list));
+        assert_eq!(rows[0].depth, Some(0));
+        assert_eq!(rows[0].inlinks, Some(0));
     }
 }

@@ -18,6 +18,7 @@ function row(over: Partial<UrlRow> = {}): UrlRow {
     indexable: "yes",
     depth: 0,
     inlinks: 3,
+    offList: false,
     wordCount: 120,
     size: null,
     elapsedMs: 0,

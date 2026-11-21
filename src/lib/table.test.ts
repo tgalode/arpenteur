@@ -17,6 +17,7 @@ function row(p: Partial<UrlRow>): UrlRow {
     indexable: "yes",
     depth: 0,
     inlinks: 0,
+    offList: false,
     wordCount: null,
     size: null,
     elapsedMs: 0,

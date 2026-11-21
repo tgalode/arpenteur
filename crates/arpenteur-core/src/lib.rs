@@ -12,4 +12,5 @@ pub mod settings;
 pub mod sitemap;
 pub mod siteone;
 pub mod storage;
+pub mod url_list;
 pub mod urls;

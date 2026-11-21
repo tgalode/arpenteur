@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::settings::SkipReason;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CrawlSettings {
@@ -234,8 +236,12 @@ pub struct UrlRow {
     pub h1_count: u32,
     pub canonical: Option<String>,
     pub indexable: Indexability,
+    /// `None` en mode liste, où les liens ne sont pas suivis.
     pub depth: Option<u32>,
-    pub inlinks: u32,
+    /// `None` en mode liste.
+    pub inlinks: Option<u32>,
+    /// Mode liste : adresse atteinte par une redirection, absente de la liste.
+    pub off_list: bool,
     pub word_count: Option<u32>,
     pub size: Option<i64>,
     pub elapsed_ms: u64,
@@ -260,6 +266,27 @@ pub struct CrawlMeta {
     pub status: CrawlStatus,
     pub settings: CrawlSettings,
     pub pages: u32,
+    #[serde(default)]
+    pub mode: CrawlMode,
+    /// Mode liste : les adresses de la liste nettoyée, écartées comprises.
+    #[serde(default)]
+    pub list_urls: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CrawlMode {
+    #[default]
+    Site,
+    List,
+}
+
+/// Adresse de la liste que le crawl n'a pas demandée.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedUrl {
+    pub url: String,
+    pub reason: SkipReason,
 }
 
 /// Version des faits collectés par page : 2 depuis que la langue de la page est relevée.
@@ -282,6 +309,9 @@ pub struct CollectedData {
     /// Adresses externes non demandées : limite de requêtes atteinte ou crawl interrompu.
     #[serde(default)]
     pub external_unchecked: u32,
+    /// Mode liste : adresses interdites par robots.txt ou exclues par les motifs.
+    #[serde(default)]
+    pub list_skipped: Vec<SkippedUrl>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -323,4 +353,6 @@ pub struct CrawlResult {
     pub external_links: Vec<ExternalCheck>,
     #[serde(default)]
     pub external_unchecked: u32,
+    #[serde(default)]
+    pub list_skipped: Vec<SkippedUrl>,
 }

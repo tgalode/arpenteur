@@ -119,6 +119,19 @@ pub fn build_core_options(
     Ok(options)
 }
 
+/// Mode liste : SiteOne demande `first` puis `rest`, sans suivre les liens
+/// (`single_page`, car `max_depth` n'empêche pas de lire les liens d'une page).
+pub fn build_list_core_options(
+    settings: &CrawlSettings,
+    first: &Url,
+    crawl_dir: &Path,
+    rest: Vec<String>,
+) -> Result<CoreOptions, CrawlError> {
+    let mut options = build_core_options(settings, first, crawl_dir, rest)?;
+    options.single_page = true;
+    Ok(options)
+}
+
 /// Compile les motifs comme SiteOne (`Crawler::new`) : un motif invalide est ignoré.
 fn compile_patterns<'a>(patterns: impl Iterator<Item = &'a str>) -> Vec<Regex> {
     patterns
@@ -285,6 +298,26 @@ mod tests {
             options.url_list_urls,
             vec!["https://exemple.fr/orphan".to_string()]
         );
+    }
+
+    #[test]
+    fn list_options_do_not_follow_links() {
+        let site = build_core_options(
+            &CrawlSettings::default(),
+            &start(),
+            Path::new("/tmp/c"),
+            vec![],
+        );
+        assert!(!site.unwrap().single_page);
+        let options = build_list_core_options(
+            &CrawlSettings::default(),
+            &start(),
+            Path::new("/tmp/c"),
+            vec!["https://exemple.fr/a".to_string()],
+        )
+        .unwrap();
+        assert!(options.single_page);
+        assert_eq!(options.url_list_urls, ["https://exemple.fr/a"]);
     }
 
     #[test]

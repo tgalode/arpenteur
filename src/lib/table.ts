@@ -50,7 +50,7 @@ const INDEXABLE_ORDER: Record<Indexability, number> = { yes: 0, no: 1, notAnalyz
 
 export type StatusClass = "all" | "2xx" | "3xx" | "4xx" | "5xx" | "error";
 
-function compare(a: string | number, b: string | number, key?: keyof UrlRow): number {
+function compare(a: string | number | boolean, b: string | number | boolean, key?: keyof UrlRow): number {
   if (key === "indexable") return INDEXABLE_ORDER[a as Indexability] - INDEXABLE_ORDER[b as Indexability];
   if (typeof a === "string" && typeof b === "string") {
     return a.localeCompare(b, "fr", { sensitivity: "base" });

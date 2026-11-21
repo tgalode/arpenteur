@@ -211,7 +211,7 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CrawlSettings, FindingCode};
+    use crate::model::{CrawlMode, CrawlSettings, FindingCode};
     use chrono::{NaiveDate, TimeZone};
 
     fn fixed() -> DateTime<Local> {
@@ -232,6 +232,8 @@ mod tests {
             status: CrawlStatus::Completed,
             settings: CrawlSettings::default(),
             pages: 3,
+            mode: CrawlMode::Site,
+            list_urls: Vec::new(),
         }
     }
 

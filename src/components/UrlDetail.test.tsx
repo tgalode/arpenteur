@@ -22,6 +22,7 @@ function row(url: string): UrlRow {
     indexable: "yes",
     depth: 0,
     inlinks: 0,
+    offList: false,
     wordCount: 10,
     size: null,
     elapsedMs: 0,
@@ -46,6 +47,7 @@ function result(findings: Finding[], urls: string[]): CrawlResult {
     sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [], robotsTxt: null },
     externalLinks: [],
     externalUnchecked: 0,
+    listSkipped: [],
   };
 }
 

@@ -1,7 +1,9 @@
 use arpenteur_core::checks::assemble;
 use arpenteur_core::model::{
-    CollectedData, CrawlMeta, CrawlSettings, CrawlStatus, FACTS_VERSION, FindingCode, Indexability,
+    CollectedData, CrawlMeta, CrawlMode, CrawlSettings, CrawlStatus, FACTS_VERSION, FindingCode,
+    Indexability,
 };
+use arpenteur_core::storage::CrawlStore;
 
 const PLAN_1_DATA: &str = include_str!("fixtures/arpenteur-plan1.json");
 
@@ -15,6 +17,8 @@ fn meta() -> CrawlMeta {
         status: CrawlStatus::Completed,
         settings: CrawlSettings::default(),
         pages: 4,
+        mode: CrawlMode::Site,
+        list_urls: Vec::new(),
     }
 }
 
@@ -121,3 +125,66 @@ fn crawl_without_external_links_loads() {
         ]
     );
 }
+
+/// `crawl.json` tel que l'écrivaient les plans 1 et 2 : ni `mode`, ni `listUrls`.
+const OLD_META: &str = r#"{
+  "id": "2026-01-01_00-00-00",
+  "domain": "www.exemple.fr",
+  "startUrl": "https://www.exemple.fr/",
+  "startedAt": "2026-01-01T00:00:00+01:00",
+  "finishedAt": "2026-01-01T00:01:00+01:00",
+  "status": { "kind": "completed" },
+  "settings": {},
+  "pages": 4
+}"#;
+
+#[test]
+fn crawl_without_mode_is_a_site_crawl() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root
+        .path()
+        .join("sites")
+        .join("www.exemple.fr")
+        .join("2026-01-01_00-00-00");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("crawl.json"), OLD_META).unwrap();
+    std::fs::write(dir.join("arpenteur.json"), PLAN_1_DATA).unwrap();
+
+    let store = CrawlStore::new(root.path().to_path_buf());
+    let result = store
+        .load_result("www.exemple.fr", "2026-01-01_00-00-00")
+        .unwrap();
+
+    assert_eq!(result.meta.mode, CrawlMode::Site);
+    assert!(result.meta.list_urls.is_empty());
+    assert!(result.list_skipped.is_empty());
+    let codes: Vec<String> = result
+        .findings
+        .iter()
+        .map(|f| format!("{:?}", f.code))
+        .collect();
+    assert_eq!(codes, PLAN_1_CODES);
+
+    let root_row = result
+        .rows
+        .iter()
+        .find(|r| r.url == "https://www.exemple.fr/")
+        .unwrap();
+    assert_eq!((root_row.depth, root_row.inlinks), (Some(0), Some(1)));
+    assert!(result.rows.iter().all(|r| !r.off_list));
+    assert!(result.rows.iter().all(|r| r.inlinks.is_some()));
+    assert!(result.rows.iter().any(|r| r.depth == Some(1)));
+}
+
+const PLAN_1_CODES: [&str; 10] = [
+    "BrokenInternalLink",
+    "SitemapNotFound",
+    "DuplicateContent",
+    "DuplicateContent",
+    "TitleTooShort",
+    "TitleTooShort",
+    "MetaDescriptionMissing",
+    "TitleDuplicate",
+    "TitleDuplicate",
+    "SecurityHeadersMissing",
+];

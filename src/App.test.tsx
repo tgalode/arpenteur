@@ -35,6 +35,8 @@ function meta(id: string, status: CrawlStatus): CrawlMeta {
       limitThreshold: 5,
     },
     pages: 0,
+    mode: "site",
+    listUrls: [],
   };
 }
 
@@ -48,6 +50,7 @@ function result(id: string, status: CrawlStatus): CrawlResult {
     sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [], robotsTxt: null },
     externalLinks: [],
     externalUnchecked: 0,
+    listSkipped: [],
   };
 }
 

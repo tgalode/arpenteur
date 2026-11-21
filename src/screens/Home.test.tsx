@@ -36,6 +36,8 @@ function meta(
       limitThreshold: 5,
     },
     pages,
+    mode: "site",
+    listUrls: [],
   };
 }
 

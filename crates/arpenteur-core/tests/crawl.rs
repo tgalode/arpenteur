@@ -8,16 +8,16 @@ use arpenteur_core::canonical_probe::{
     PostCrawl, ProbeEnv, probe_canonical_targets, run_post_crawl_probes,
 };
 use arpenteur_core::collector::CrawlEvents;
-use arpenteur_core::engine::run_crawl;
+use arpenteur_core::engine::{CrawlTarget, run_crawl};
 use arpenteur_core::external_links::{
     MAX_REDIRECTS, check_external_links, classify_status, external_client_with_timeout,
     external_targets,
 };
 use arpenteur_core::model::{
-    CrawlMeta, CrawlResult, CrawlSettings, CrawlStatus, ExternalOutcome, FindingCode, Indexability,
-    Progress, UrlRow,
+    CrawlMeta, CrawlMode, CrawlResult, CrawlSettings, CrawlStatus, ExternalOutcome, FindingCode,
+    Indexability, Progress, UrlRow,
 };
-use arpenteur_core::settings::UrlFilter;
+use arpenteur_core::settings::{SkipReason, UrlFilter};
 use arpenteur_core::sitemap::{discover, discover_with_limit};
 use arpenteur_core::storage::CrawlStore;
 use support::{Variant, start_fixture_site};
@@ -168,7 +168,15 @@ async fn run_with(
         .unwrap();
     let cancel = CancellationToken::new();
     let events = events(&cancel);
-    let meta = run_crawl(settings, start, store.clone(), loc.clone(), events, cancel).await;
+    let meta = run_crawl(
+        settings,
+        CrawlTarget::Site(start),
+        store.clone(),
+        loc.clone(),
+        events,
+        cancel,
+    )
+    .await;
     (site, store, loc, meta, root)
 }
 
@@ -265,7 +273,7 @@ async fn unreachable_site_fails() {
         .unwrap();
     let meta = run_crawl(
         fast_settings(),
-        start,
+        CrawlTarget::Site(start),
         store.clone(),
         loc.clone(),
         Arc::new(NoEvents),
@@ -717,6 +725,8 @@ async fn hanging_canonical_target_times_out_without_record() {
             status: CrawlStatus::Completed,
             settings: fast_settings(),
             pages: 1,
+            mode: CrawlMode::Site,
+            list_urls: Vec::new(),
         },
         arpenteur_core::model::CollectedData {
             pages: [pages, added].concat(),
@@ -1308,4 +1318,169 @@ async fn stopped_crawl_checks_no_external_link() {
             .iter()
             .any(|p| p.starts_with("/ext-"))
     );
+}
+
+async fn run_list(variant: Variant, settings: CrawlSettings, paths: &[&str]) -> CrawlRun {
+    let site = start_fixture_site(variant).await;
+    let root = tempfile::tempdir().unwrap();
+    let store = CrawlStore::new(root.path().to_path_buf());
+    let urls: Vec<Url> = paths
+        .iter()
+        .map(|p| Url::parse(&format!("{}{}", site.base, p)).unwrap())
+        .collect();
+    let loc = store
+        .create_crawl(urls[0].host_str().unwrap(), chrono::Local::now())
+        .unwrap();
+    let meta = run_crawl(
+        settings,
+        CrawlTarget::List(urls),
+        store.clone(),
+        loc.clone(),
+        Arc::new(NoEvents),
+        CancellationToken::new(),
+    )
+    .await;
+    (site, store, loc, meta, root)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_mode_requests_only_listed_urls() {
+    let (site, store, loc, meta, _root) =
+        run_list(Variant::Standard, fast_settings(), &["/", "/a"]).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    assert_eq!(meta.mode, CrawlMode::List);
+    assert_eq!(meta.start_url, format!("{}/", site.base));
+    assert_eq!(
+        meta.list_urls,
+        [format!("{}/", site.base), format!("{}/a", site.base)]
+    );
+    assert_eq!(meta.pages, 2);
+
+    // "/" lie /a, /b, /old, /temp, /missing : aucun n'est suivi, sauf /a qui est listé.
+    for path in ["/b", "/old", "/temp", "/missing", "/dup1", "/orphan"] {
+        assert!(!site.requested(path), "{path}");
+    }
+    assert!(!site.requested("/sitemap.xml"));
+    assert!(!site.requested("/app.js") && !site.requested("/style.css"));
+    assert_eq!(site.count("/a"), 1);
+
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    let paths: Vec<String> = r.rows.iter().map(|x| path_of(&x.url)).collect();
+    assert_eq!(paths.len(), 2);
+    assert!(paths.contains(&"/".to_string()) && paths.contains(&"/a".to_string()));
+    for x in &r.rows {
+        assert_eq!((x.depth, x.inlinks, x.off_list), (None, None, false));
+    }
+    assert!(r.list_skipped.is_empty());
+    // Les liens de la page sont relevés quand même.
+    assert!(
+        r.pages
+            .iter()
+            .find(|p| path_of(&p.url) == "/")
+            .and_then(|p| p.facts.as_ref())
+            .is_some_and(|f| f.links.len() == 5)
+    );
+    for code in [
+        FindingCode::OrphanPage,
+        FindingCode::NotInSitemap,
+        FindingCode::SitemapNotFound,
+        FindingCode::SitemapUrlError,
+        FindingCode::BrokenInternalLink,
+    ] {
+        assert!(!r.findings.iter().any(|f| f.code == code), "{code:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_mode_follows_redirects_and_marks_them_off_list() {
+    // /old redirige en 301 vers /a, que la liste ne contient pas.
+    let (site, store, loc, meta, _root) =
+        run_list(Variant::Standard, fast_settings(), &["/old", "/orphan"]).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    assert!(site.requested("/a"));
+    assert!(!site.requested("/b") && !site.requested("/dup1"));
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    assert_eq!(r.rows.len(), 3);
+    assert!(row(&r, "/a").off_list);
+    assert!(!row(&r, "/old").off_list);
+    assert!(!row(&r, "/orphan").off_list);
+    assert_eq!(row(&r, "/old").status, 301);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_mode_skips_disallowed_and_excluded_urls() {
+    let settings = CrawlSettings {
+        ignore_regex: vec!["/tag/".to_string()],
+        ..fast_settings()
+    };
+    let (site, store, loc, meta, _root) = run_list(
+        Variant::RobotsDisallow,
+        settings,
+        &["/private/secret", "/tag/x", "/orphan", "/"],
+    )
+    .await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    assert!(!site.requested("/private/secret") && !site.requested("/tag/x"));
+    assert!(site.requested("/orphan") && site.requested("/"));
+    // Le nom du crawl reste la première adresse donnée, même écartée.
+    assert_eq!(meta.start_url, format!("{}/private/secret", site.base));
+    assert_eq!(meta.list_urls.len(), 4);
+    assert_eq!(meta.pages, 2);
+
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    let skipped: Vec<(String, SkipReason)> = r
+        .list_skipped
+        .iter()
+        .map(|s| (path_of(&s.url), s.reason))
+        .collect();
+    assert_eq!(
+        skipped,
+        [
+            ("/private/secret".to_string(), SkipReason::Robots),
+            ("/tag/x".to_string(), SkipReason::Pattern),
+        ]
+    );
+    assert_eq!(r.rows.len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_mode_fails_when_everything_is_skipped() {
+    let (site, store, loc, meta, _root) = run_list(
+        Variant::RobotsDisallow,
+        fast_settings(),
+        &["/private/secret"],
+    )
+    .await;
+    let expected = CrawlStatus::Failed {
+        message: "Toutes les adresses de la liste sont interdites par robots.txt ou exclues par les motifs."
+            .to_string(),
+    };
+    assert_eq!(meta.status, expected);
+    assert!(!site.requested("/private/secret"));
+    let (m, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(m.status, expected);
+    assert_eq!(data.list_skipped.len(), 1);
+    assert!(data.pages.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_mode_runs_post_crawl_probes() {
+    let (site, store, loc, meta, _root) =
+        run_list(Variant::ExternalLinks, fast_settings(), &["/"]).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    assert!(!site.requested("/p2"));
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    // Compression (deuxième requête sur "/") et liens externes, une requête par adresse.
+    assert_eq!(data.start_content_encoding.as_deref(), Some(""));
+    assert_eq!(site.count("/"), 2);
+    assert_eq!(data.external_links.len(), 10);
+    assert_eq!(site.count("/ext-ok"), 1);
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    assert!(has_with_related(
+        &r,
+        FindingCode::BrokenExternalLink,
+        "/ext-404",
+        &["/"]
+    ));
+    assert!(has(&r, FindingCode::ModernCompressionMissing, "/"));
 }
