@@ -12,7 +12,7 @@ Il est construit avec Tauri et React. Le moteur de crawl est [SiteOne Crawler](h
 - Il exporte les résultats en CSV, lisible directement dans Excel en français.
 - Il a des réglages : nombre de connexions, débit, limite de requêtes, motifs à inclure ou à ignorer, respect du robots.txt.
 - Il vérifie les liens externes cassés : cette vérification envoie une requête par lien externe aux sites tiers, et se désactive dans les réglages.
-- Les crawls sont enregistrés sur votre poste. Rien n'est envoyé ailleurs.
+- Les résultats restent sur votre poste.
 
 Un écran « à propos » donne la version et la licence du moteur de crawl.
 

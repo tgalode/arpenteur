@@ -1,6 +1,6 @@
 # Arpenteur : catalogue des problèmes
 
-Version 1 · 20 novembre 2026 · statut : validé le 20 novembre, sans modification
+Version 1 · 20 novembre 2026 · statut : validé le 20 novembre, complété avec le plan 3 par `brokenExternalLink`
 
 Ce catalogue alimente le panneau Problèmes du plan 2. Chaque problème a un identifiant stable, un niveau, un titre, une explication et une correction. Les textes sont écrits pour pouvoir figurer tels quels dans un rapport client.
 
@@ -62,7 +62,7 @@ Les seuils viennent de la conception (D5) et restent réglables.
 | `headingStructure` | Niveaux de titres sautés | La page passe par exemple d'un H1 à un H3. Sa structure est moins claire. | Respecter l'ordre H1, H2, H3. | SiteOne |
 | `jsonLdMissing` | Aucune donnée structurée | La page ne peut pas obtenir de résultat enrichi (FAQ, avis, entreprise locale). | Ajouter le JSON-LD adapté au type de page. | nous |
 | `htmlLangMissing` | Langue de la page non déclarée | Google et les lecteurs d'écran devinent la langue. | Ajouter `lang="fr"` sur la balise html. | SiteOne |
-| `securityHeadersMissing` | En-têtes de sécurité manquants | Le site est moins protégé contre certaines attaques (HSTS, CSP, X-Frame-Options…). | Ajouter les en-têtes manquants dans la configuration du serveur. | SiteOne |
+| `securityHeadersMissing` | En-têtes de sécurité manquants | Le site est moins protégé contre certaines attaques (HSTS, CSP, X-Frame-Options…). | Ajouter les en-têtes manquants dans la configuration du serveur. | nous |
 | `phoneNotClickable` | Numéro de téléphone non cliquable | Sur mobile, le visiteur ne peut pas appeler en un geste. | Mettre le numéro dans un lien `tel:`. | SiteOne |
 | `modernCompressionMissing` | Compression Brotli absente | Les pages pèsent plus lourd que nécessaire. | Activer Brotli sur le serveur. | SiteOne |
 
