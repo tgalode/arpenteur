@@ -76,6 +76,7 @@ use url::Url;
 use crate::canonical_probe::{ProbeEnv, probe_client, run_post_crawl_probes};
 use crate::collector::{CollectorHandle, CrawlEvents, PageCollector};
 use crate::external_links::external_client;
+use crate::live::LiveCrawl;
 use crate::model::{
     CollectedData, CrawlLocation, CrawlMeta, CrawlMode, CrawlSettings, CrawlStatus,
     ExternalProgress, FACTS_VERSION, Progress, SitemapResult, SkippedUrl,
@@ -161,6 +162,8 @@ async fn execute(
     location: &CrawlLocation,
     events: Arc<dyn CrawlEvents>,
     cancel: &CancellationToken,
+    live: &LiveCrawl,
+    meta: &CrawlMeta,
 ) -> Executed {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -246,6 +249,10 @@ async fn execute(
         }
     };
 
+    // Lisible par l'application le temps de la collecte seulement : la garde vide
+    // l'emplacement au retour d'`execute`, avant les sondes de fin.
+    let _live_guard = live.begin(handle.clone(), executed.sitemap.clone(), meta.clone());
+
     // Annuler le futur arrête la boucle de SiteOne : une URL = une tâche déjà lancée,
     // donc au plus `workers` requêtes en vol se terminent, aucune nouvelle ne part.
     // `biased` : l'annulation est vue avant que la boucle ne lance une autre tâche.
@@ -276,6 +283,7 @@ pub async fn run_crawl(
     location: CrawlLocation,
     events: Arc<dyn CrawlEvents>,
     cancel: CancellationToken,
+    live: LiveCrawl,
 ) -> CrawlMeta {
     let (mode, list_urls) = match &target {
         CrawlTarget::Site(_) => (CrawlMode::Site, Vec::new()),
@@ -307,7 +315,7 @@ pub async fn run_crawl(
         list_skipped,
     } = match initial_write {
         Err(e) => Executed::new(write_failure(e)),
-        Ok(()) => execute(&settings, &target, &location, events, &cancel).await,
+        Ok(()) => execute(&settings, &target, &location, events, &cancel, &live, &meta).await,
     };
 
     let mut pages = handle.map(|h| h.pages()).unwrap_or_default();

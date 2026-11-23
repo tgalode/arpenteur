@@ -1,8 +1,8 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
-import type { CrawlMeta, CrawlResult, CrawlStatus, Finding, Progress, UrlRow } from "../lib/types";
+import type { CrawlMeta, CrawlResult, CrawlStatus, Finding, LiveView, Progress, UrlRow } from "../lib/types";
 
 vi.mock("../lib/api", () => ({
   startCrawl: vi.fn(),
@@ -12,6 +12,7 @@ vi.mock("../lib/api", () => ({
   onProgress: vi.fn(),
   onFinished: vi.fn(),
   exportCsv: vi.fn(),
+  peekCrawl: vi.fn(),
 }));
 
 import * as api from "../lib/api";
@@ -142,7 +143,10 @@ afterAll(() => {
   }
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -155,6 +159,7 @@ beforeEach(() => {
     return () => {};
   });
   vi.mocked(api.stopCrawl).mockResolvedValue(true);
+  vi.mocked(api.peekCrawl).mockResolvedValue(null);
 });
 
 test("la progression met à jour le compteur", async () => {
@@ -527,4 +532,179 @@ test("« relancer » rejoue la liste", async () => {
   expect(vi.mocked(api.startListCrawl).mock.calls).toEqual([["https://exemple.fr/\nhttps://exemple.fr/tarifs"]]);
   expect(api.startCrawl).not.toHaveBeenCalled();
   await waitFor(() => expect(onOpen).toHaveBeenCalledWith("exemple.fr", "nouvel-id", true));
+});
+
+// Résultats pendant le crawl : minuteries simulées, l'horloge de `Date` suit.
+
+function liveView(rows: UrlRow[], findings: Finding[] = []): LiveView {
+  return { meta: meta({ kind: "running" }), rows, findings };
+}
+
+const LIVE_ROWS = [
+  row("https://exemple.fr/", { title: "Accueil", h1: "Bienvenue" }),
+  row("https://exemple.fr/tarifs", { title: "Tarifs", h1: "Nos tarifs", depth: 1, inlinks: 1 }),
+];
+
+async function advance(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
+async function renderRunning() {
+  vi.useFakeTimers();
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
+  render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} onOpen={() => {}} />);
+  await advance(0);
+}
+
+// userEvent attend un setTimeout que les minuteries simulées de vitest ne déclenchent jamais.
+function type(label: string, value: string) {
+  fireEvent.change(screen.getByRole("searchbox", { name: label }), { target: { value } });
+}
+
+test("pendant le crawl, le panneau et le tableau se remplissent et « résultats provisoires » s’affiche", async () => {
+  vi.mocked(api.peekCrawl).mockResolvedValue(liveView(LIVE_ROWS, TARIFS_FINDINGS));
+  await renderRunning();
+  expect(screen.getByText("https://exemple.fr/tarifs")).toBeTruthy();
+  expect(screen.getAllByRole("row")).toHaveLength(3);
+  expect(screen.getByRole("button", { name: /^Meta description trop courte/ })).toBeTruthy();
+  expect(screen.getByText("résultats provisoires")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "arrêter" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "exporter les URL" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "exporter les problèmes" })).toBeNull();
+});
+
+test("un instantané est demandé toutes les 2 secondes", async () => {
+  await renderRunning();
+  expect(api.peekCrawl).toHaveBeenCalledTimes(1);
+  await advance(1999);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(1);
+  await advance(1);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(2);
+  await advance(2000);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(3);
+});
+
+test("un instantané de 800 ms repousse le suivant à 3,2 secondes", async () => {
+  vi.mocked(api.peekCrawl).mockImplementation(
+    () => new Promise((resolve) => setTimeout(() => resolve(liveView(LIVE_ROWS)), 800)),
+  );
+  await renderRunning();
+  expect(api.peekCrawl).toHaveBeenCalledTimes(1);
+  await advance(800 + 3199);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(1);
+  await advance(1);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(2);
+});
+
+test("un instantané de 500 ms garde l’intervalle de 2 secondes", async () => {
+  vi.mocked(api.peekCrawl).mockImplementation(
+    () => new Promise((resolve) => setTimeout(() => resolve(liveView(LIVE_ROWS)), 500)),
+  );
+  await renderRunning();
+  await advance(500 + 1999);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(1);
+  await advance(1);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(2);
+});
+
+test("un instantané encore en cours n’en lance pas un second", async () => {
+  vi.mocked(api.peekCrawl).mockImplementation(() => new Promise(() => {}));
+  await renderRunning();
+  await advance(20000);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(1);
+});
+
+test("un instantané nul ou en erreur garde le dernier affichage", async () => {
+  vi.mocked(api.peekCrawl)
+    .mockResolvedValueOnce(liveView(LIVE_ROWS, TARIFS_FINDINGS))
+    .mockResolvedValueOnce(null)
+    .mockRejectedValueOnce("erreur")
+    .mockResolvedValue(null);
+  await renderRunning();
+  expect(screen.getAllByRole("row")).toHaveLength(3);
+  await advance(2000);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(2);
+  expect(screen.getAllByRole("row")).toHaveLength(3);
+  await advance(2000);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(3);
+  expect(screen.getAllByRole("row")).toHaveLength(3);
+  expect(screen.queryByRole("alert")).toBeNull();
+  // Le suivi continue après un échec.
+  await advance(2000);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(4);
+  expect(screen.getByText("https://exemple.fr/tarifs")).toBeTruthy();
+});
+
+test("le filtre de problème, la recherche et le tri survivent à un nouvel instantané", async () => {
+  const more = [...LIVE_ROWS, row("https://exemple.fr/tarifs-pro", { depth: 2 })];
+  const findings = [
+    ...TARIFS_FINDINGS,
+    { code: "metaDescriptionTooShort", url: "https://exemple.fr/tarifs-pro", related: [], detail: null } as Finding,
+  ];
+  vi.mocked(api.peekCrawl)
+    .mockResolvedValueOnce(liveView(LIVE_ROWS, TARIFS_FINDINGS))
+    .mockResolvedValue(liveView(more, findings));
+  await renderRunning();
+  fireEvent.click(screen.getByRole("button", { name: /^Meta description trop courte/ }));
+  type("filtre", "tarifs");
+  fireEvent.click(screen.getByRole("columnheader", { name: /prof\./ }));
+  fireEvent.click(screen.getByRole("columnheader", { name: /prof\./ }));
+  const table = screen.getByRole("table");
+  expect(screen.getAllByRole("row")).toHaveLength(2);
+
+  await advance(2000);
+
+  expect(api.peekCrawl).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole("table")).toBe(table);
+  expect(screen.getByRole("status", { name: "filtre actif" })).toBeTruthy();
+  expect((screen.getByRole("searchbox", { name: "filtre" }) as HTMLInputElement).value).toBe("tarifs");
+  expect(screen.getByRole("columnheader", { name: /prof\./ }).getAttribute("aria-sort")).toBe("descending");
+  expect(screen.getAllByRole("row")).toHaveLength(3);
+  expect(firstDataRowUrl()).toBe("https://exemple.fr/tarifs-pro");
+});
+
+test("un clic sur une ligne pendant le crawl dit que le détail s’ouvre une fois le crawl terminé", async () => {
+  vi.mocked(api.peekCrawl).mockResolvedValue(liveView(LIVE_ROWS));
+  await renderRunning();
+  expect(screen.queryByText("le détail s’ouvre une fois le crawl terminé")).toBeNull();
+  fireEvent.click(screen.getByText("https://exemple.fr/tarifs"));
+  expect(screen.getByText("le détail s’ouvre une fois le crawl terminé")).toBeTruthy();
+  expect(screen.queryByRole("region", { name: /détail de/ })).toBeNull();
+});
+
+test("à la fin du crawl, le résultat complet remplace l’instantané sans changer de filtre", async () => {
+  vi.mocked(api.peekCrawl).mockResolvedValue(liveView(LIVE_ROWS, TARIFS_FINDINGS));
+  await renderRunning();
+  fireEvent.click(screen.getByRole("button", { name: /^Meta description trop courte/ }));
+  type("filtre", "tarifs");
+  fireEvent.change(screen.getByRole("combobox", { name: "classe de statut" }), { target: { value: "2xx" } });
+  expect(screen.getByText("résultats provisoires")).toBeTruthy();
+
+  const final = withFindings(TARIFS_FINDINGS);
+  final.rows = [...final.rows, row("https://exemple.fr/tarifs-pro")];
+  vi.mocked(api.loadCrawl).mockResolvedValue(final);
+  await act(async () => finishedCb(meta({ kind: "completed" })));
+  await advance(0);
+
+  expect(screen.queryByText("résultats provisoires")).toBeNull();
+  expect(screen.getByRole("status", { name: "filtre actif" })).toBeTruthy();
+  expect((screen.getByRole("searchbox", { name: "filtre" }) as HTMLInputElement).value).toBe("tarifs");
+  expect((screen.getByRole("combobox", { name: "classe de statut" }) as HTMLSelectElement).value).toBe("2xx");
+  expect(screen.getByRole("button", { name: "exporter les URL" })).toBeTruthy();
+  // Le détail s'ouvre de nouveau, le suivi est arrêté.
+  fireEvent.click(screen.getByText("https://exemple.fr/tarifs"));
+  expect(screen.getByRole("region", { name: "détail de https://exemple.fr/tarifs" })).toBeTruthy();
+  const calls = vi.mocked(api.peekCrawl).mock.calls.length;
+  await advance(10000);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(calls);
+});
+
+test("quitter l’écran arrête le suivi", async () => {
+  await renderRunning();
+  cleanup();
+  const calls = vi.mocked(api.peekCrawl).mock.calls.length;
+  await advance(10000);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(calls);
 });

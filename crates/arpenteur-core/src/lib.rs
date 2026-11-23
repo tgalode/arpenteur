@@ -7,6 +7,7 @@ pub mod external_links;
 pub mod html;
 pub mod limit_guard;
 pub mod links;
+pub mod live;
 pub mod model;
 pub mod not_found_probe;
 pub mod settings;

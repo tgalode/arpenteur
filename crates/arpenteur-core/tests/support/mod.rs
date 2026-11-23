@@ -20,6 +20,8 @@ pub enum Variant {
     RobotsDisallow,
     /// Chaque page lente (~300 ms) et liée à `LINKED_PAGES` pages.
     Slow,
+    /// Comme `Slow`, avec un sitemap qui déclare `/` et `/p0`.
+    SlowWithSitemap,
     /// `/x` a un canonical vers `/canon-target`, qui redirige en 301 et n'est liée nulle part.
     CanonicalOrphanTarget,
     /// `/` répond `content-encoding: br` à la requête de sonde seulement.
@@ -339,9 +341,15 @@ async fn handle(State(st): State<AppState>, headers: HeaderMap, uri: Uri) -> Res
     if st.variant == Variant::Throttled && path != "/robots.txt" {
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     }
-    if st.variant == Variant::Slow {
+    if matches!(st.variant, Variant::Slow | Variant::SlowWithSitemap) {
+        let with_sitemap = st.variant == Variant::SlowWithSitemap;
         return match path.as_str() {
+            "/robots.txt" if with_sitemap => text(
+                "text/plain",
+                format!("User-agent: *\nAllow: /\nSitemap: {base}/sitemap.xml\n"),
+            ),
             "/robots.txt" => text("text/plain", "User-agent: *\nAllow: /\n".to_string()),
+            "/sitemap.xml" if with_sitemap => text("application/xml", urlset(base, &["/", "/p0"])),
             "/sitemap.xml" => StatusCode::NOT_FOUND.into_response(),
             _ => {
                 tokio::time::sleep(std::time::Duration::from_millis(300)).await;

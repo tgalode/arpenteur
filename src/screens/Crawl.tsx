@@ -3,12 +3,16 @@ import { ProblemsPanel } from "../components/ProblemsPanel";
 import { UrlDetail } from "../components/UrlDetail";
 import { UrlTable } from "../components/UrlTable";
 import { formatElapsed, t } from "../i18n/fr";
-import { exportCsv, loadCrawl, onFinished, onProgress, startCrawl, startListCrawl, stopCrawl } from "../lib/api";
+import { exportCsv, loadCrawl, onFinished, onProgress, peekCrawl, startCrawl, startListCrawl, stopCrawl } from "../lib/api";
 import { findingTitle } from "../lib/catalog";
 import { problemsCsv, urlsCsv } from "../lib/csv";
 import { statusTone, type StatusClass } from "../lib/table";
 import { normalizeUrl } from "../lib/urls";
-import type { CrawlResult, CrawlStatus, FindingCode, Progress, SkippedUrl, UrlRow } from "../lib/types";
+import type { CrawlResult, CrawlStatus, FindingCode, LiveView, Progress, SkippedUrl, UrlRow } from "../lib/types";
+
+/** Pause entre deux instantanés : 2 s, ou quatre fois la durée du dernier s'il a dépassé 500 ms. */
+const PEEK_INTERVAL_MS = 2000;
+const PEEK_SLOW_MS = 500;
 
 function skippedMessage(skipped: SkippedUrl[]): string | null {
   if (skipped.length === 0) return null;
@@ -50,6 +54,8 @@ export function Crawl({
 }) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [result, setResult] = useState<CrawlResult | null>(null);
+  const [view, setView] = useState<LiveView | null>(null);
+  const [liveNotice, setLiveNotice] = useState(false);
   const [selected, setSelected] = useState<UrlRow | null>(null);
   const [selectedCode, setSelectedCode] = useState<FindingCode | null>(null);
   const [statusClass, setStatusClass] = useState<StatusClass>("all");
@@ -116,21 +122,54 @@ export function Crawl({
     };
   }, [domain, id, running]);
 
+  const polling = running && result === null;
+  useEffect(() => {
+    if (!polling) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Un seul instantané à la fois : le suivant n'est programmé qu'une fois le précédent réglé.
+    const peek = async () => {
+      const began = Date.now();
+      try {
+        const v = await peekCrawl();
+        if (!cancelled && !finished.current && v) setView(v);
+      } catch {
+        // Le dernier affichage reste.
+      }
+      if (cancelled) return;
+      const took = Date.now() - began;
+      timer = setTimeout(() => void peek(), took > PEEK_SLOW_MS ? took * 4 : PEEK_INTERVAL_MS);
+    };
+    void peek();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [polling]);
+
+  const rows = result?.rows ?? view?.rows ?? null;
+  const findings = result?.findings ?? view?.findings ?? null;
+
   const progressParts = t("progress", { elapsed: progress ? formatElapsed(progress.elapsedMs) : "" }).split("{done}");
   const message = result ? banner(result.meta.status) : null;
   const skipped = result ? skippedMessage(result.listSkipped) : null;
 
   const urlFilter = useMemo(() => {
-    if (!result || !selectedCode) return null;
-    const known = new Set(result.rows.map((r) => normalizeUrl(r.url)));
+    if (!rows || !findings || !selectedCode) return null;
+    const known = new Set(rows.map((r) => normalizeUrl(r.url)));
     const urls = new Set<string>();
-    for (const f of result.findings) {
+    for (const f of findings) {
       if (f.code !== selectedCode) continue;
       urls.add(normalizeUrl(f.url));
       for (const u of f.related) if (known.has(normalizeUrl(u))) urls.add(normalizeUrl(u));
     }
     return urls;
-  }, [result, selectedCode]);
+  }, [rows, findings, selectedCode]);
+
+  function selectRow(row: UrlRow) {
+    if (result) setSelected(row);
+    else setLiveNotice(true);
+  }
 
   async function restart() {
     if (!result) return;
@@ -220,29 +259,34 @@ export function Crawl({
         </p>
       )}
       {!result && !running && !error && <p className="crawl-loading dim">{t("loading")}</p>}
-      {result && (
+      {rows && findings && (
         <>
-          {message && (
+          {result && message && (
             <p role="status" className={`crawl-banner tone-${statusTone(result.meta.status.kind)}`}>
               {message}
             </p>
           )}
-          {result.externalUnchecked > 0 && (
+          {result && result.externalUnchecked > 0 && (
             <p role="status" className="crawl-banner tone-warn">
               {result.externalUnchecked === 1
                 ? t("externalUncheckedOne")
                 : t("externalUncheckedMany", { count: result.externalUnchecked })}
             </p>
           )}
-          {skipped && (
+          {result && skipped && (
             <p role="status" className="crawl-banner tone-warn">
               {skipped}
             </p>
           )}
+          {!result && (
+            <p role="status" className="crawl-banner tone-warn">
+              {t("provisional")}
+            </p>
+          )}
           <div className="crawl-body">
             <ProblemsPanel
-              findings={result.findings}
-              rows={result.rows}
+              findings={findings}
+              rows={rows}
               selectedCode={selectedCode}
               onSelect={setSelectedCode}
               statusClass={statusClass}
@@ -257,15 +301,20 @@ export function Crawl({
                   </button>
                 </p>
               )}
+              {!result && liveNotice && (
+                <p role="status" className="problems-filter dim">
+                  {t("detailAfterCrawl")}
+                </p>
+              )}
               <UrlTable
-                rows={result.rows}
+                rows={rows}
                 selectedUrl={selected?.url ?? null}
                 urlFilter={urlFilter}
-                onSelect={setSelected}
+                onSelect={selectRow}
                 statusClass={statusClass}
                 onStatusClass={setStatusClass}
               />
-              {selected && <UrlDetail row={selected} result={result} />}
+              {result && selected && <UrlDetail row={selected} result={result} />}
             </div>
           </div>
         </>

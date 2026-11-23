@@ -13,6 +13,7 @@ use arpenteur_core::external_links::{
     MAX_REDIRECTS, check_external_links, classify_status, external_client_with_timeout,
     external_targets,
 };
+use arpenteur_core::live::LiveCrawl;
 use arpenteur_core::model::{
     CrawlMeta, CrawlMode, CrawlResult, CrawlSettings, CrawlStatus, ExternalOutcome, FindingCode,
     Indexability, Progress, UrlRow,
@@ -192,6 +193,15 @@ async fn run_with(
     settings: CrawlSettings,
     events: impl FnOnce(&CancellationToken) -> Arc<dyn CrawlEvents>,
 ) -> CrawlRun {
+    run_with_live(variant, settings, LiveCrawl::new(), events).await
+}
+
+async fn run_with_live(
+    variant: Variant,
+    settings: CrawlSettings,
+    live: LiveCrawl,
+    events: impl FnOnce(&CancellationToken) -> Arc<dyn CrawlEvents>,
+) -> CrawlRun {
     let site = start_fixture_site(variant).await;
     let root = tempfile::tempdir().unwrap();
     let store = CrawlStore::new(root.path().to_path_buf());
@@ -208,6 +218,7 @@ async fn run_with(
         loc.clone(),
         events,
         cancel,
+        live,
     )
     .await;
     (site, store, loc, meta, root)
@@ -311,6 +322,7 @@ async fn unreachable_site_fails() {
         loc.clone(),
         Arc::new(NoEvents),
         CancellationToken::new(),
+        LiveCrawl::new(),
     )
     .await;
     let expected = CrawlStatus::Failed {
@@ -1427,6 +1439,7 @@ async fn run_list(variant: Variant, settings: CrawlSettings, paths: &[&str]) -> 
         loc.clone(),
         Arc::new(NoEvents),
         CancellationToken::new(),
+        LiveCrawl::new(),
     )
     .await;
     (site, store, loc, meta, root)
@@ -1843,4 +1856,150 @@ async fn without_a_follow_client_only_compression_and_canonical_probes_run() {
     assert_eq!(r.pages.len(), 1);
     assert!(r.not_found.is_none() && r.external.is_empty());
     assert_eq!(site.count_prefix(support::NOT_FOUND_PREFIX), 0);
+}
+
+/// Lance un crawl en tâche de fond : le test prend des instantanés pendant qu'il tourne.
+struct Background {
+    site: support::FixtureSite,
+    task: tokio::task::JoinHandle<CrawlMeta>,
+    cancel: CancellationToken,
+    store: CrawlStore,
+    loc: arpenteur_core::model::CrawlLocation,
+    _root: tempfile::TempDir,
+}
+
+async fn spawn_crawl(variant: Variant, live: &LiveCrawl) -> Background {
+    let site = start_fixture_site(variant).await;
+    let root = tempfile::tempdir().unwrap();
+    let store = CrawlStore::new(root.path().to_path_buf());
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let loc = store
+        .create_crawl(start.host_str().unwrap(), chrono::Local::now())
+        .unwrap();
+    let cancel = CancellationToken::new();
+    let task = tokio::spawn(run_crawl(
+        fast_settings(),
+        CrawlTarget::Site(start),
+        store.clone(),
+        loc.clone(),
+        Arc::new(NoEvents),
+        cancel.clone(),
+        live.clone(),
+    ));
+    Background {
+        site,
+        task,
+        cancel,
+        store,
+        loc,
+        _root: root,
+    }
+}
+
+/// Attend qu'une condition soit vraie, sans compter sur un délai fixe.
+async fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !condition() {
+        assert!(Instant::now() < deadline, "délai dépassé : {what}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_during_the_crawl_shows_collected_pages() {
+    let live = LiveCrawl::new();
+    let run = spawn_crawl(Variant::SlowWithSitemap, &live).await;
+    wait_until("première page collectée", || {
+        live.snapshot().is_some_and(|v| !v.rows.is_empty())
+    })
+    .await;
+    let view = live.snapshot().unwrap();
+
+    assert_eq!(view.meta.status, CrawlStatus::Running);
+    assert_eq!(view.meta.pages as usize, view.rows.len());
+    assert!(view.rows.iter().all(|r| r.url.starts_with(&run.site.base)));
+    // Le sitemap lu avant le crawl est connu de l'instantané.
+    assert!(
+        view.findings
+            .iter()
+            .all(|f| f.code != FindingCode::SitemapNotFound),
+        "{:?}",
+        view.findings
+    );
+
+    let meta = run.task.await.unwrap();
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    assert_eq!(meta.pages as usize, support::LINKED_PAGES + 1);
+    assert!(
+        view.rows.len() < meta.pages as usize,
+        "{} lignes pour {} pages",
+        view.rows.len(),
+        meta.pages
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_is_none_outside_the_collection() {
+    let live = LiveCrawl::new();
+    assert!(live.snapshot().is_none());
+
+    let run = spawn_crawl(Variant::NotFoundHangs, &live).await;
+    // La sonde d'adresse inexistante est la première des sondes qui ne répond jamais.
+    wait_until("sonde d'adresse inexistante", || {
+        run.site.count_prefix(support::NOT_FOUND_PREFIX) > 0
+    })
+    .await;
+    assert!(live.snapshot().is_none(), "pendant les sondes de fin");
+
+    run.cancel.cancel();
+    let meta = run.task.await.unwrap();
+    assert!(live.snapshot().is_none(), "après la fin");
+    let (_, data) = run.store.read_crawl(&run.loc.domain, &run.loc.id).unwrap();
+    assert_eq!(meta.pages as usize, data.pages.len());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_is_none_when_the_crawl_fails_before_collecting() {
+    let port = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    let root = tempfile::tempdir().unwrap();
+    let store = CrawlStore::new(root.path().to_path_buf());
+    let start = Url::parse(&format!("http://127.0.0.1:{port}/")).unwrap();
+    let loc = store
+        .create_crawl(start.host_str().unwrap(), chrono::Local::now())
+        .unwrap();
+    let live = LiveCrawl::new();
+    let meta = run_crawl(
+        fast_settings(),
+        CrawlTarget::Site(start),
+        store,
+        loc,
+        Arc::new(NoEvents),
+        CancellationToken::new(),
+        live.clone(),
+    )
+    .await;
+    assert!(matches!(meta.status, CrawlStatus::Failed { .. }));
+    assert!(live.snapshot().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_does_not_slow_the_crawl() {
+    let live = LiveCrawl::new();
+    let run = spawn_crawl(Variant::Slow, &live).await;
+    wait_until("début de la collecte", || live.snapshot().is_some()).await;
+    for _ in 0..50 {
+        live.snapshot();
+        tokio::time::sleep(Duration::from_millis(15)).await;
+    }
+    let meta = run.task.await.unwrap();
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    let (_, data) = run.store.read_crawl(&run.loc.domain, &run.loc.id).unwrap();
+    let mut urls: Vec<&str> = data.pages.iter().map(|p| p.url.as_str()).collect();
+    urls.sort();
+    urls.dedup();
+    assert_eq!(urls.len(), support::LINKED_PAGES + 1);
+    assert_eq!(data.pages.len(), support::LINKED_PAGES + 1);
 }

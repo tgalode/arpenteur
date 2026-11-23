@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use arpenteur_core::defaults::validate_settings;
 use arpenteur_core::engine::{CrawlTarget, run_crawl};
+use arpenteur_core::live::LiveView;
 use arpenteur_core::model::{
     CrawlMeta, CrawlMode, CrawlResult, CrawlSettings, CrawlStatus, SiteSummary,
 };
@@ -95,6 +96,7 @@ fn begin_crawl(
     let events = Arc::new(TauriEvents::new(app.clone()));
     let run_id = running.id;
     let cancel = running.token;
+    let live = state.live.clone();
     let started_at = Local::now().to_rfc3339();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
@@ -106,6 +108,7 @@ fn begin_crawl(
             location.clone(),
             events,
             cancel,
+            live,
         ));
         let meta = match inner.await {
             Ok(meta) => meta,
@@ -156,6 +159,16 @@ pub fn save_settings(
 #[tauri::command]
 pub fn stop_crawl(state: State<'_, AppState>) -> bool {
     state.stop()
+}
+
+/// Instantané du crawl en cours, `None` hors de la collecte. Le calcul se fait hors du
+/// fil principal de la fenêtre : une commande asynchrone, sur un fil réservé au calcul.
+#[tauri::command]
+pub async fn peek_crawl(state: State<'_, AppState>) -> Result<Option<LiveView>, String> {
+    let live = state.live.clone();
+    tauri::async_runtime::spawn_blocking(move || live.snapshot())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -27,6 +27,7 @@ pub fn run() {
             commands::start_crawl,
             commands::start_list_crawl,
             commands::stop_crawl,
+            commands::peek_crawl,
             commands::get_settings,
             commands::save_settings,
             commands::list_sites,

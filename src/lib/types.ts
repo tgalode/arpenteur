@@ -219,6 +219,13 @@ export interface CrawlResult {
   listSkipped: SkippedUrl[];
 }
 
+/** Instantané d'un crawl en cours : mêmes lignes et constats qu'à la fin, provisoires. */
+export interface LiveView {
+  meta: CrawlMeta;
+  rows: UrlRow[];
+  findings: Finding[];
+}
+
 export interface StartedCrawl {
   domain: string;
   id: string;

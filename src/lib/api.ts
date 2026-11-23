@@ -5,6 +5,7 @@ import type {
   CrawlMeta,
   CrawlResult,
   CrawlSettings,
+  LiveView,
   Progress,
   SiteSummary,
   StartedCrawl,
@@ -30,6 +31,11 @@ export function saveSettings(settings: CrawlSettings): Promise<void> {
 
 export function stopCrawl(): Promise<boolean> {
   return invoke<boolean>("stop_crawl");
+}
+
+/** `null` hors de la collecte (avant la première page, pendant les vérifications de fin). */
+export function peekCrawl(): Promise<LiveView | null> {
+  return invoke<LiveView | null>("peek_crawl");
 }
 
 export function listSites(): Promise<SiteSummary[]> {

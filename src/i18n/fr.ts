@@ -20,6 +20,8 @@ export const fr = {
   skippedPattern: "{count} par un motif",
   progress: "{done} URL traitées · {elapsed}",
   progressExternal: "vérification des liens externes : {done} / {total}",
+  provisional: "résultats provisoires",
+  detailAfterCrawl: "le détail s’ouvre une fois le crawl terminé",
   back: "retour",
   status_running: "en cours",
   status_completed: "terminé",

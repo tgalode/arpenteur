@@ -187,6 +187,9 @@ pub struct CheckInput<'a> {
     pub list: Option<&'a [String]>,
     /// Réponse du site à une adresse inexistante ; `None` : non observée.
     pub not_found: Option<&'a NotFoundProbe>,
+    /// Instantané pendant le crawl : un constat qui pourrait changer ou disparaître quand
+    /// le crawl avance n'est pas produit (page orpheline, canonical dont la cible est inconnue).
+    pub partial: bool,
 }
 
 impl<'a> CheckInput<'a> {
@@ -207,6 +210,7 @@ impl<'a> CheckInput<'a> {
             external_links: &[],
             list: None,
             not_found: None,
+            partial: false,
         }
     }
 }
@@ -223,6 +227,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
         external_links,
         list,
         not_found,
+        partial,
     } = *input;
     let list_mode = list.is_some();
     let listed: BTreeSet<String> = list.unwrap_or_default().iter().map(|u| norm(u)).collect();
@@ -264,6 +269,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
                     &by_url,
                     &is_internal,
                     throttled,
+                    partial,
                 )
                 .into_iter()
                 .for_each(|(code, related)| push(code, &page.url, related, None));
@@ -458,6 +464,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
             };
             if *url != start_norm
                 && page.status == 200
+                && !partial
                 && links.inlinks.get(url).is_none_or(|v| v.is_empty())
             {
                 push(FindingCode::OrphanPage, &page.url, vec![], None);
@@ -664,12 +671,17 @@ fn canonical_finding(
     by_url: &BTreeMap<String, &PageRecord>,
     is_internal: &impl Fn(&str) -> bool,
     throttled: bool,
+    partial: bool,
 ) -> Option<(FindingCode, Vec<String>)> {
     let Some(canonical) = canonical else {
         return Some((FindingCode::CanonicalMissing, vec![]));
     };
     let target = norm(canonical);
     if target == norm(&page.url) {
+        return None;
+    }
+    // Cible pas encore lue : elle peut devenir une redirection ou une erreur.
+    if partial && !by_url.contains_key(&target) {
         return None;
     }
     let code = match by_url.get(&target) {
@@ -1000,6 +1012,48 @@ mod tests {
         assert_eq!(found[0].url, full("/a"));
         assert_eq!(found[0].related, vec![full("/b")]);
         assert!(of(&f, FindingCode::CanonicalToRedirect).is_empty());
+    }
+
+    #[test]
+    fn partial_mode_hides_orphans_and_unresolved_canonicals() {
+        let pages = vec![
+            html("/").links(&["/linked"]).rec(),
+            html("/linked").rec(),
+            html("/orphan").rec(),
+            html("/a").canonical(Some("/unknown")).rec(),
+            html("/b").canonical(Some("/old")).rec(),
+            redirect("/old", 301, "/linked"),
+            html("/notitle").rec(),
+        ];
+        let mut pages = pages;
+        pages[6].facts.as_mut().unwrap().title = None;
+        let sm = sitemap(&["/", "/linked", "/orphan"]);
+        let links = analyze_links(&pages, START);
+        let run = |partial| {
+            run_checks(&CheckInput {
+                partial,
+                ..CheckInput::new(&pages, &links, &sm, START)
+            })
+        };
+
+        let f = run(true);
+        assert!(of(&f, FindingCode::OrphanPage).is_empty());
+        assert!(of(&f, FindingCode::CanonicalToOtherUrl).is_empty());
+        assert_eq!(
+            urls_of(&f, FindingCode::CanonicalToRedirect),
+            vec![full("/b")]
+        );
+        assert_eq!(
+            urls_of(&f, FindingCode::TitleMissing),
+            vec![full("/notitle")]
+        );
+
+        let f = run(false);
+        assert_eq!(urls_of(&f, FindingCode::OrphanPage), vec![full("/orphan")]);
+        assert_eq!(
+            urls_of(&f, FindingCode::CanonicalToOtherUrl),
+            vec![full("/a")]
+        );
     }
 
     #[test]

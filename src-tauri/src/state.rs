@@ -1,12 +1,15 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use arpenteur_core::live::LiveCrawl;
 use arpenteur_core::storage::CrawlStore;
 use tokio_util::sync::CancellationToken;
 
 /// Un seul crawl à la fois : le jeton du crawl en cours, s'il y en a un.
 pub struct AppState {
     pub store: CrawlStore,
+    /// Pages en cours de collecte, lues par `peek_crawl`.
+    pub live: LiveCrawl,
     running: Mutex<Option<(u64, CancellationToken)>>,
     next_id: AtomicU64,
     exiting: AtomicBool,
@@ -34,6 +37,7 @@ impl AppState {
     pub fn new(store: CrawlStore) -> Self {
         Self {
             store,
+            live: LiveCrawl::new(),
             running: Mutex::new(None),
             next_id: AtomicU64::new(0),
             exiting: AtomicBool::new(false),
