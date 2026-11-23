@@ -224,6 +224,19 @@ async fn run_with_live(
     (site, store, loc, meta, root)
 }
 
+/// Arpenteur ne lit rien de l'analyse DNS de SiteOne, dont les trois résolutions
+/// peuvent durer 30 s à la fin de chaque crawl quand le DNS répond mal.
+#[tokio::test(flavor = "multi_thread")]
+async fn siteone_report_has_no_dns_table() {
+    let (_site, _store, loc, meta, _root) = run(Variant::Standard, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    let raw = std::fs::read_to_string(loc.dir.join("siteone.json")).unwrap();
+    let report: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let tables = report["tables"].as_object().unwrap();
+    assert!(!tables.is_empty());
+    assert!(!tables.contains_key("dns"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn crawl_completes_and_writes_files() {
     let (site, store, loc, meta, _root) = run(Variant::Standard, |_| Arc::new(NoEvents)).await;
@@ -1262,18 +1275,26 @@ async fn cancel_stops_external_checks() {
     assert!((checks.len(), used) == (0, 0));
     assert_eq!(site.requests.lock().unwrap().len(), 0);
 
-    // Annulé pendant l'attente du débit : la première vérification est gardée.
+    // Annulé dès la première vérification enregistrée, donc avant l'attente du débit
+    // suivante : elle est gardée, et aucune autre requête ne part.
     let cancel = CancellationToken::new();
     let canceller = cancel.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(600)).await;
-        canceller.cancel();
-    });
-    let began = Instant::now();
-    let (checks, used) = check(&targets, 10, Duration::from_millis(400), &cancel).await;
-    assert!(began.elapsed() < Duration::from_secs(5));
+    let (checks, used) = check_external_links(
+        &ext_client(),
+        &targets,
+        10,
+        Duration::from_millis(100),
+        &cancel,
+        &move |done, _| {
+            if done == 1 {
+                canceller.cancel();
+            }
+        },
+    )
+    .await;
     assert_eq!((checks.len(), used), (1, 1));
     assert_eq!(checks[0].outcome, ExternalOutcome::Ok);
+    assert_eq!(site.requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

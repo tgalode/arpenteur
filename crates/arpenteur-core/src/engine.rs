@@ -1,12 +1,12 @@
 //! Lancement d'un crawl et enregistrement des analyseurs de siteone-crawler.
-//! Il exige un runtime multi-thread (DnsAnalyzer appelle block_in_place).
+//! L'analyse DNS de SiteOne n'est pas enregistrée : Arpenteur n'en lit rien, et ses
+//! résolutions peuvent bloquer la fin d'un crawl une trentaine de secondes.
 
 use siteone_crawler::analysis::accessibility_analyzer::AccessibilityAnalyzer;
 use siteone_crawler::analysis::best_practice_analyzer::BestPracticeAnalyzer;
 use siteone_crawler::analysis::browser_console_analyzer::BrowserConsoleAnalyzer;
 use siteone_crawler::analysis::caching_analyzer::CachingAnalyzer;
 use siteone_crawler::analysis::content_type_analyzer::ContentTypeAnalyzer;
-use siteone_crawler::analysis::dns_analyzer::DnsAnalyzer;
 use siteone_crawler::analysis::external_links_analyzer::ExternalLinksAnalyzer;
 use siteone_crawler::analysis::fastest_analyzer::FastestAnalyzer;
 use siteone_crawler::analysis::headers_analyzer::HeadersAnalyzer;
@@ -22,7 +22,7 @@ use siteone_crawler::analysis::ssl_tls::SslTlsAnalyzer;
 use siteone_crawler::options::core_options::CoreOptions;
 
 /// Recopie de `Initiator::register_analyzers` de siteone-crawler 2.5.1
-/// (privée, et `Initiator::new` appelle `std::process::exit`).
+/// (privée, et `Initiator::new` appelle `std::process::exit`), sans `DnsAnalyzer`.
 pub fn register_builtin_analyzers(am: &mut AnalysisManager, options: &CoreOptions) {
     am.register_analyzer(Box::new(AccessibilityAnalyzer::new()));
     am.register_analyzer(Box::new(BestPracticeAnalyzer::new()));
@@ -33,7 +33,6 @@ pub fn register_builtin_analyzers(am: &mut AnalysisManager, options: &CoreOption
 
     am.register_analyzer(Box::new(CachingAnalyzer::new()));
     am.register_analyzer(Box::new(ContentTypeAnalyzer::new()));
-    am.register_analyzer(Box::new(DnsAnalyzer::new()));
     am.register_analyzer(Box::new(ExternalLinksAnalyzer::new()));
 
     let mut fastest = FastestAnalyzer::new();
