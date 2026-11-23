@@ -1057,6 +1057,24 @@ mod tests {
     }
 
     #[test]
+    fn partial_mode_hides_a_canonical_to_an_unknown_other_host() {
+        let pages = vec![html("/a").canonical(Some("https://autre.fr/x")).rec()];
+        let links = analyze_links(&pages, START);
+        let sm = no_sitemap();
+        let run = |partial| {
+            run_checks(&CheckInput {
+                partial,
+                ..CheckInput::new(&pages, &links, &sm, START)
+            })
+        };
+        assert!(of(&run(true), FindingCode::CanonicalToOtherHost).is_empty());
+        assert_eq!(
+            urls_of(&run(false), FindingCode::CanonicalToOtherHost),
+            vec![full("/a")]
+        );
+    }
+
+    #[test]
     fn canonical_to_redirect() {
         let pages = vec![
             html("/a").canonical(Some("/old")).rec(),

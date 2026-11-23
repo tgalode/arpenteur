@@ -708,3 +708,24 @@ test("quitter l’écran arrête le suivi", async () => {
   await advance(10000);
   expect(api.peekCrawl).toHaveBeenCalledTimes(calls);
 });
+
+test("un instantané vide, avant la première page, montre le panneau et le tableau vides", async () => {
+  vi.mocked(api.peekCrawl).mockResolvedValue(liveView([]));
+  await renderRunning();
+  expect(screen.getByText("résultats provisoires")).toBeTruthy();
+  expect(screen.getByRole("table")).toBeTruthy();
+  expect(screen.getAllByRole("row")).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "arrêter" })).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("si le résultat final ne se charge pas, les instantanés s’arrêtent quand même", async () => {
+  await renderRunning();
+  vi.mocked(api.loadCrawl).mockRejectedValue("lecture impossible");
+  await act(async () => finishedCb(meta({ kind: "completed" })));
+  await advance(0);
+  expect(screen.getByRole("alert").textContent).toContain("lecture impossible");
+  const calls = vi.mocked(api.peekCrawl).mock.calls.length;
+  await advance(10000);
+  expect(api.peekCrawl).toHaveBeenCalledTimes(calls);
+});

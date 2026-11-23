@@ -56,6 +56,7 @@ export function Crawl({
   const [result, setResult] = useState<CrawlResult | null>(null);
   const [view, setView] = useState<LiveView | null>(null);
   const [liveNotice, setLiveNotice] = useState(false);
+  const [ended, setEnded] = useState(false);
   const [selected, setSelected] = useState<UrlRow | null>(null);
   const [selectedCode, setSelectedCode] = useState<FindingCode | null>(null);
   const [statusClass, setStatusClass] = useState<StatusClass>("all");
@@ -81,6 +82,7 @@ export function Crawl({
     const finish = async () => {
       if (finished.current) return;
       finished.current = true;
+      if (!cancelled) setEnded(true);
       await show();
     };
 
@@ -122,7 +124,7 @@ export function Crawl({
     };
   }, [domain, id, running]);
 
-  const polling = running && result === null;
+  const polling = running && result === null && !ended;
   useEffect(() => {
     if (!polling) return;
     let cancelled = false;

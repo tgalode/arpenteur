@@ -2003,3 +2003,28 @@ async fn snapshot_does_not_slow_the_crawl() {
     assert_eq!(urls.len(), support::LINKED_PAGES + 1);
     assert_eq!(data.pages.len(), support::LINKED_PAGES + 1);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_before_the_first_page_is_empty() {
+    let live = LiveCrawl::new();
+    let run = spawn_crawl(Variant::Slow, &live).await;
+    // La première page met ~300 ms : le premier instantané arrive avant elle.
+    let mut first = None;
+    wait_until("début de la collecte", || {
+        first = live.snapshot();
+        first.is_some()
+    })
+    .await;
+    let view = first.unwrap();
+    assert!(view.rows.is_empty());
+    assert_eq!(view.meta.pages, 0);
+    assert_eq!(view.meta.status, CrawlStatus::Running);
+    let start = format!("{}/", run.site.base);
+    assert!(
+        view.findings.iter().all(|f| f.url == start),
+        "{:?}",
+        view.findings
+    );
+    run.cancel.cancel();
+    run.task.await.unwrap();
+}
