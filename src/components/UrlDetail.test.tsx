@@ -162,6 +162,7 @@ function withLinks(hrefs: string[]): PageRecord {
       metaDescription: null,
       h1: [],
       canonical: null,
+      canonicals: [],
       metaRobots: null,
       links: hrefs.map((href) => ({ href, anchor: "", nofollow: false })),
       images: [],

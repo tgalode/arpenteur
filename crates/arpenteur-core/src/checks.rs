@@ -18,6 +18,7 @@ pub const TITLE_MIN_CHARS: usize = 30;
 pub const TITLE_MAX_CHARS: usize = 60;
 pub const META_MIN_CHARS: usize = 70;
 pub const META_MAX_CHARS: usize = 160;
+pub const H1_MAX_CHARS: usize = 70;
 
 /// Texte aux espaces réduits (suites, retours à la ligne, bords) ; `None` s'il est vide.
 fn collapsed(text: Option<&str>) -> Option<String> {
@@ -135,13 +136,17 @@ fn missing_security_headers(page: &PageRecord) -> Vec<&'static str> {
         .collect()
 }
 
-/// Mode liste : les adresses listées et les pages où mènent leurs redirections (chaînes comprises).
-fn list_scope(pages: &[PageRecord], listed: &BTreeSet<String>) -> BTreeSet<String> {
-    let redirects: BTreeMap<String, String> = pages
+fn redirect_map(pages: &[PageRecord]) -> BTreeMap<String, String> {
+    pages
         .iter()
         .filter(|p| (300..400).contains(&p.status))
         .filter_map(|p| Some((norm(&p.url), redirect_target(&p.url, p)?)))
-        .collect();
+        .collect()
+}
+
+/// Mode liste : les adresses listées et les pages où mènent leurs redirections (chaînes comprises).
+fn list_scope(pages: &[PageRecord], listed: &BTreeSet<String>) -> BTreeSet<String> {
+    let redirects = redirect_map(pages);
     let mut scope = listed.clone();
     for first in listed {
         let mut current = first;
@@ -258,6 +263,15 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
                 )
                 .into_iter()
                 .for_each(|(code, related)| push(code, &page.url, related, None));
+                // Avant la version 3 seule la première balise canonical était relevée.
+                if facts_version >= 3 && facts.canonicals.len() >= 2 {
+                    push(
+                        FindingCode::CanonicalMultiple,
+                        &page.url,
+                        vec![],
+                        Some(facts.canonicals.join(", ")),
+                    );
+                }
                 if facts.json_ld.is_empty() {
                     push(FindingCode::JsonLdMissing, &page.url, vec![], None);
                 }
@@ -293,6 +307,11 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
                         0 => push(FindingCode::H1Missing, &page.url, vec![], None),
                         1 => {}
                         _ => push(FindingCode::H1Multiple, &page.url, vec![], None),
+                    }
+                    if char_count(facts.h1.first().map(String::as_str))
+                        .is_some_and(|n| n as usize > H1_MAX_CHARS)
+                    {
+                        push(FindingCode::H1TooLong, &page.url, vec![], None);
                     }
                 }
                 let no_alt: Vec<String> = facts
@@ -492,6 +511,9 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
         (FindingCode::MetaDescriptionDuplicate, |f: &PageFacts| {
             f.meta_description.clone()
         }),
+        (FindingCode::H1Duplicate, |f: &PageFacts| {
+            f.h1.first().cloned()
+        }),
     ] {
         let mut by_text: BTreeMap<String, Vec<&str>> = BTreeMap::new();
         for page in &indexable {
@@ -513,6 +535,37 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
                 related.sort();
                 push(code.clone(), url, related, None);
             }
+        }
+    }
+
+    if list_mode {
+        let redirects = redirect_map(pages);
+        for first in &listed {
+            let Some(page) = by_url.get(first) else {
+                continue;
+            };
+            let mut current = first;
+            let mut seen = BTreeSet::from([first.clone()]);
+            while let Some(next) = redirects.get(current).filter(|n| seen.insert((*n).clone())) {
+                current = next;
+            }
+            let Some(last) = by_url.get(current) else {
+                continue;
+            };
+            if !is_error(last, throttled) {
+                continue;
+            }
+            let status = if last.status < 0 {
+                "sans réponse".to_string()
+            } else {
+                last.status.to_string()
+            };
+            let detail = if current == first {
+                status
+            } else {
+                format!("redirige vers {} ({status})", last.url)
+            };
+            push(FindingCode::ListedUrlError, &page.url, vec![], Some(detail));
         }
     }
 
@@ -675,6 +728,7 @@ mod tests {
                 meta_description: None,
                 h1: vec!["h".into()],
                 canonical: Some(url.clone()),
+                canonicals: vec![url.clone()],
                 meta_robots: None,
                 links: vec![],
                 images: vec![],
@@ -772,6 +826,14 @@ mod tests {
         }
         fn meta(mut self, m: Option<&str>) -> P {
             self.facts().meta_description = m.map(Into::into);
+            self
+        }
+        fn h1_texts(mut self, texts: &[&str]) -> P {
+            self.facts().h1 = texts.iter().map(|t| t.to_string()).collect();
+            self
+        }
+        fn canonicals(mut self, paths: &[&str]) -> P {
+            self.facts().canonicals = paths.iter().map(|p| full(p)).collect();
             self
         }
         fn h1s(mut self, n: usize) -> P {
@@ -1946,6 +2008,10 @@ mod tests {
             HttpsInvalid => 35,
             SecurityHeadersMissing => 36,
             BrokenExternalLink => 37,
+            H1Duplicate => 38,
+            H1TooLong => 39,
+            CanonicalMultiple => 40,
+            ListedUrlError => 41,
         }
     }
 
@@ -1991,6 +2057,10 @@ mod tests {
             HttpsInvalid,
             SecurityHeadersMissing,
             BrokenExternalLink,
+            H1Duplicate,
+            H1TooLong,
+            CanonicalMultiple,
+            ListedUrlError,
         ];
         for (i, code) in all.iter().enumerate() {
             assert_eq!(declared_index(code), i, "ordre de déclaration : {code:?}");
@@ -2125,6 +2195,158 @@ mod tests {
             list: listed.as_deref(),
             ..CheckInput::new(pages, &links, &sm, START)
         })
+    }
+
+    #[test]
+    fn h1_too_long_boundary() {
+        let pages = vec![
+            html("/c70").h1_texts(&[&"a".repeat(70)]).rec(),
+            html("/c71").h1_texts(&[&"a".repeat(71)]).rec(),
+            html("/spaces").h1_texts(&["a   b"]).rec(),
+            html("/spaces-long")
+                .h1_texts(&[&format!("{}   {}", "a".repeat(35), "b".repeat(35))])
+                .rec(),
+            html("/noindex")
+                .robots("noindex")
+                .h1_texts(&[&"a".repeat(80)])
+                .rec(),
+            html("/second").h1_texts(&["court", &"a".repeat(80)]).rec(),
+            html("/none").h1_texts(&[]).rec(),
+        ];
+        let f = run_list(&pages, None);
+        // « a…a   b…b » compte 71 caractères une fois les espaces réduits : 35 + 1 + 35 = 71.
+        assert_eq!(
+            urls_of(&f, FindingCode::H1TooLong),
+            [full("/c71"), full("/spaces-long")]
+        );
+    }
+
+    #[test]
+    fn h1_duplicate_among_indexable_pages() {
+        let pages = vec![
+            html("/a").h1_texts(&["Nos  tarifs"]).rec(),
+            html("/b").h1_texts(&["Nos tarifs", "autre"]).rec(),
+            html("/c").h1_texts(&["Nos tarifs"]).robots("noindex").rec(),
+            html("/d").h1_texts(&["unique"]).rec(),
+            html("/e").h1_texts(&["  "]).rec(),
+            html("/f").h1_texts(&[""]).rec(),
+            html("/g").h1_texts(&[]).rec(),
+            html("/h").h1_texts(&["autre"]).rec(),
+        ];
+        let f = run_list(&pages, None);
+        let dup = of(&f, FindingCode::H1Duplicate);
+        assert_eq!(
+            dup.iter().map(|d| d.url.clone()).collect::<Vec<_>>(),
+            [full("/a"), full("/b")]
+        );
+        assert_eq!(dup[0].related, [full("/b")]);
+        assert_eq!(dup[1].related, [full("/a")]);
+    }
+
+    #[test]
+    fn h1_duplicate_list_mode_ignores_pages_outside_the_list() {
+        let twin = |p: &str| html(p).h1_texts(&["Même H1"]).rec();
+        let pages = vec![twin("/a"), twin("/b"), twin("/hors")];
+        let found =
+            |list: &[&str]| urls_of(&run_list(&pages, Some(list)), FindingCode::H1Duplicate);
+        assert_eq!(found(&["/a", "/b"]), [full("/a"), full("/b")]);
+        assert!(found(&["/a"]).is_empty());
+    }
+
+    #[test]
+    fn canonical_multiple_needs_two_tags_and_new_facts() {
+        let pages = vec![
+            html("/two").canonicals(&["/a", "/b"]).rec(),
+            html("/one").canonicals(&["/a"]).rec(),
+            html("/same").canonicals(&["/a", "/a"]).rec(),
+            html("/none").canonicals(&[]).rec(),
+        ];
+        let run = |version: u32| {
+            let links = analyze_links(&pages, START);
+            let sm = no_sitemap();
+            run_checks(&CheckInput {
+                facts_version: version,
+                ..CheckInput::new(&pages, &links, &sm, START)
+            })
+        };
+        let f = run(3);
+        assert_eq!(
+            urls_of(&f, FindingCode::CanonicalMultiple),
+            [full("/same"), full("/two")]
+        );
+        let two = of(&f, FindingCode::CanonicalMultiple)
+            .into_iter()
+            .find(|d| d.url == full("/two"))
+            .unwrap();
+        assert_eq!(
+            two.detail.as_deref(),
+            Some(format!("{}, {}", full("/a"), full("/b")).as_str())
+        );
+        assert!(of(&run(2), FindingCode::CanonicalMultiple).is_empty());
+    }
+
+    #[test]
+    fn listed_url_error_only_in_list_mode() {
+        let pages = vec![
+            other("/a", 404, "html"),
+            html("/b").rec(),
+            redirect("/c", 301, &full("/d")),
+            other("/d", 500, "html"),
+            other("/e", -1, "html"),
+            html("/g").rec(),
+        ];
+        let list = ["/a", "/b", "/c", "/e", "/f"];
+        let f = run_list(&pages, Some(&list));
+        let found = of(&f, FindingCode::ListedUrlError);
+        let got: Vec<(String, Option<&str>)> = found
+            .iter()
+            .map(|d| (d.url.clone(), d.detail.as_deref()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (full("/a"), Some("404")),
+                (
+                    full("/c"),
+                    Some(format!("redirige vers {} (500)", full("/d")).as_str())
+                ),
+                (full("/e"), Some("sans réponse")),
+            ]
+        );
+        assert!(found.iter().all(|d| d.related.is_empty()));
+        // Mode site : jamais ce code.
+        assert!(of(&run_list(&pages, None), FindingCode::ListedUrlError).is_empty());
+    }
+
+    #[test]
+    fn listed_url_error_ignores_throttling_and_loops() {
+        let pages = vec![
+            other("/a", 429, "html"),
+            other("/b", 503, "html"),
+            redirect("/c", 301, &full("/d")),
+            redirect("/d", 301, &full("/c")),
+            redirect("/e", 301, &full("/inconnue")),
+            redirect("/f", 301, &full("/ok")),
+            html("/ok").rec(),
+        ];
+        let links = analyze_links(&pages, START);
+        let sm = no_sitemap();
+        let listed: Vec<String> = ["/a", "/b", "/c", "/e", "/f"]
+            .iter()
+            .map(|p| full(p))
+            .collect();
+        let run = |throttled: bool| {
+            run_checks(&CheckInput {
+                list: Some(&listed[..]),
+                throttled,
+                ..CheckInput::new(&pages, &links, &sm, START)
+            })
+        };
+        assert_eq!(
+            urls_of(&run(false), FindingCode::ListedUrlError),
+            [full("/a"), full("/b")]
+        );
+        assert!(of(&run(true), FindingCode::ListedUrlError).is_empty());
     }
 
     #[test]

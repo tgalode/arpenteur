@@ -31,6 +31,7 @@ export interface PageFacts {
   metaDescription: string | null;
   h1: string[];
   canonical: string | null;
+  canonicals: string[];
   metaRobots: string | null;
   links: Link[];
   images: Image[];
@@ -128,7 +129,11 @@ export type FindingCode =
   | "noindex"
   | "notInSitemap"
   | "thinContent"
-  | "brokenExternalLink";
+  | "brokenExternalLink"
+  | "h1Duplicate"
+  | "h1TooLong"
+  | "canonicalMultiple"
+  | "listedUrlError";
 
 export interface Finding {
   code: FindingCode;

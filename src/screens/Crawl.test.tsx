@@ -90,6 +90,7 @@ function result(status: CrawlStatus): CrawlResult {
           metaDescription: "Les prix",
           h1: ["Nos tarifs"],
           canonical: null,
+          canonicals: [],
           metaRobots: null,
           links: [],
           images: [],

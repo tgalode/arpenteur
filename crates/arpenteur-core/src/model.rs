@@ -105,6 +105,9 @@ pub struct PageFacts {
     pub meta_description: Option<String>,
     pub h1: Vec<String>,
     pub canonical: Option<String>,
+    /// Toutes les balises canonical, résolues, dans l'ordre : `canonical` est la première.
+    #[serde(default)]
+    pub canonicals: Vec<String>,
     pub meta_robots: Option<String>,
     pub links: Vec<Link>,
     pub images: Vec<Image>,
@@ -211,6 +214,10 @@ pub enum FindingCode {
     HttpsInvalid,
     SecurityHeadersMissing,
     BrokenExternalLink,
+    H1Duplicate,
+    H1TooLong,
+    CanonicalMultiple,
+    ListedUrlError,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -298,8 +305,8 @@ pub struct SkippedUrl {
     pub reason: SkipReason,
 }
 
-/// Version des faits collectés par page : 2 depuis que la langue de la page est relevée.
-pub const FACTS_VERSION: u32 = 2;
+/// Version des faits collectés par page : 3 depuis que toutes les balises canonical sont relevées.
+pub const FACTS_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]

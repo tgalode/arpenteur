@@ -409,6 +409,7 @@ fn fixture_page(
             meta_description: None,
             h1: vec![],
             canonical: canonical.map(str::to_string),
+            canonicals: vec![],
             meta_robots: None,
             links: vec![],
             images: vec![],

@@ -167,6 +167,7 @@ mod tests {
                 meta_description: None,
                 h1: vec![],
                 canonical: None,
+                canonicals: vec![],
                 meta_robots: None,
                 links: links
                     .iter()

@@ -188,3 +188,29 @@ const PLAN_1_CODES: [&str; 10] = [
     "TitleDuplicate",
     "SecurityHeadersMissing",
 ];
+
+/// Faits du plan 3 (version 2) : pas de `canonicals`, donc jamais `canonicalMultiple`.
+#[test]
+fn plan_3_crawl_gains_no_canonical_multiple() {
+    let mut data: CollectedData = serde_json::from_str(PLAN_1_DATA).unwrap();
+    data.facts_version = 2;
+    assert!(
+        data.pages
+            .iter()
+            .filter_map(|p| p.facts.as_ref())
+            .all(|f| f.canonicals.is_empty())
+    );
+    let result = assemble(meta(), data, None);
+
+    let codes: Vec<String> = result
+        .findings
+        .iter()
+        .map(|f| format!("{:?}", f.code))
+        .collect();
+    assert!(!codes.iter().any(|c| c == "CanonicalMultiple"));
+    assert!(!codes.iter().any(|c| c == "ListedUrlError"));
+    assert!(!codes.iter().any(|c| c == "H1Duplicate" || c == "H1TooLong"));
+    // La version 2 relève la langue : seul `HtmlLangMissing` s'ajoute au plan 1.
+    let others: Vec<&String> = codes.iter().filter(|c| *c != "HtmlLangMissing").collect();
+    assert_eq!(others, PLAN_1_CODES);
+}

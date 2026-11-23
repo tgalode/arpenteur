@@ -36,5 +36,9 @@
   "modernCompressionMissing",
   "httpsInvalid",
   "securityHeadersMissing",
-  "brokenExternalLink"
+  "brokenExternalLink",
+  "h1Duplicate",
+  "h1TooLong",
+  "canonicalMultiple",
+  "listedUrlError"
 ]

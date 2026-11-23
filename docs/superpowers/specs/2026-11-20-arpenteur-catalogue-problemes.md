@@ -25,6 +25,7 @@ Les seuils viennent de la conception (D5) et restent réglables.
 | `serverError` | Erreur serveur (5xx) | La page ne répond pas. Google finit par la retirer de l'index si l'erreur dure. | Corriger l'erreur côté serveur. | nous (à ajouter) |
 | `canonicalToError` | Canonical vers une page en erreur | La page désigne comme référence une adresse qui n'existe pas. Google ignore ce signal. | Pointer le canonical vers l'adresse valide de la page. | nous |
 | `canonicalToRedirect` | Canonical vers une redirection | La page désigne comme référence une adresse qui redirige. Les signaux envoyés à Google se contredisent. | Pointer le canonical vers l'adresse finale. | nous |
+| `listedUrlError` | Adresse de la liste en erreur | Une adresse de la liste répond par une erreur, ou ne répond pas. | Corriger l'adresse, la rediriger ou la retirer. | nous |
 | `sitemapUrlError` | Adresse du sitemap en erreur | Le sitemap annonce à Google une page qui n'existe plus. | Retirer l'adresse du sitemap ou la corriger. | nous |
 | `titleMissing` | Title absent | Google invente un titre pour le résultat de recherche. | Écrire un title unique et descriptif. | nous (à ajouter) |
 | `httpsInvalid` | Certificat HTTPS invalide ou bientôt expiré | Les navigateurs affichent une alerte et les visiteurs repartent. | Renouveler ou corriger le certificat. | SiteOne |
@@ -36,6 +37,7 @@ Les seuils viennent de la conception (D5) et restent réglables.
 | `redirectChain` | Chaîne de redirections | Plusieurs redirections à la suite ralentissent la page et diluent les signaux. | Rediriger directement vers l'adresse finale. | nous |
 | `temporaryRedirect` | Redirection temporaire (302, 303, 307) | Google peut garder l'ancienne adresse dans ses résultats. | Passer en redirection permanente (301 ou 308) si le changement est définitif. | nous |
 | `canonicalMissing` | Canonical absent | Sans référence, Google choisit seul entre les variantes d'une page (paramètres, majuscules, slash final). | Ajouter un canonical vers l'adresse de la page elle-même. | nous |
+| `canonicalMultiple` | Plusieurs balises canonical | La page désigne plusieurs adresses de référence. Google peut les ignorer toutes. | Ne garder qu'une balise canonical par page. | nous |
 | `canonicalToOtherHost` | Canonical vers un autre site | La page cède son référencement à un autre domaine. | Vérifier que c'est voulu, sinon pointer vers la page elle-même. | nous |
 | `orphanPage` | Page orpheline | La page est dans le sitemap, mais aucune page du site n'y mène. Google la juge peu importante. | Ajouter des liens internes vers cette page. | nous |
 | `duplicateContent` | Contenu identique sur plusieurs pages | Google ne sait pas quelle page montrer et peut n'en garder aucune. | Fusionner les pages ou désigner une page de référence avec le canonical. | nous |
@@ -58,6 +60,8 @@ Les seuils viennent de la conception (D5) et restent réglables.
 | `metaDescriptionTooLong` | Meta description trop longue (plus de 160 caractères) | Google la coupe dans les résultats. | La raccourcir. | nous (à ajouter) |
 | `metaDescriptionTooShort` | Meta description trop courte (moins de 70 caractères) | L'extrait donne peu envie de cliquer. | La compléter. | nous (à ajouter) |
 | `metaDescriptionDuplicate` | Meta description en double | Plusieurs pages ont le même extrait. | Écrire une description propre à chaque page. | SiteOne |
+| `h1Duplicate` | H1 en double | Plusieurs pages ont le même titre principal. Elles se distinguent moins bien. | Donner à chaque page un H1 qui lui est propre. | nous |
+| `h1TooLong` | H1 trop long (plus de 70 caractères) | Un titre principal long se lit mal et dilue le sujet de la page. | Raccourcir le H1 à l'essentiel. | nous |
 | `h1Multiple` | Plusieurs H1 | Le sujet principal de la page est flou. | Garder un seul H1 et passer les autres en H2. | nous (à ajouter) |
 | `headingStructure` | Niveaux de titres sautés | La page passe par exemple d'un H1 à un H3. Sa structure est moins claire. | Respecter l'ordre H1, H2, H3. | SiteOne |
 | `jsonLdMissing` | Aucune donnée structurée | La page ne peut pas obtenir de résultat enrichi (FAQ, avis, entreprise locale). | Ajouter le JSON-LD adapté au type de page. | nous |

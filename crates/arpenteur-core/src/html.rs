@@ -198,10 +198,12 @@ pub fn extract_page(html: &str, page_url: &Url) -> PageFacts {
 
     let h1 = doc.select(&sel("h1")).map(element_text).collect();
 
-    let canonical = doc
+    let canonicals: Vec<String> = doc
         .select(&sel("link[rel][href]"))
-        .find(|l| has_rel(l, "canonical"))
-        .and_then(|l| resolve(&base, l.value().attr("href")?));
+        .filter(|l| has_rel(l, "canonical"))
+        .filter_map(|l| resolve(&base, l.value().attr("href")?))
+        .collect();
+    let canonical = canonicals.first().cloned();
 
     let links = doc
         .select(&sel("a[href]"))
@@ -279,6 +281,7 @@ pub fn extract_page(html: &str, page_url: &Url) -> PageFacts {
         meta_description: meta_content("description"),
         h1,
         canonical,
+        canonicals,
         meta_robots: meta_content("robots"),
         links,
         images,
@@ -322,6 +325,18 @@ mod tests {
     fn first_title_wins_when_duplicated() {
         let f = facts("<head><title>A</title><title>B</title></head>");
         assert_eq!(f.title.as_deref(), Some("A"));
+    }
+
+    #[test]
+    fn extracts_every_canonical_in_order() {
+        let f = facts(
+            r#"<head><link rel="canonical" href="/a"><link rel="canonical" href="../b"></head>"#,
+        );
+        assert_eq!(f.canonicals, vec!["https://x.fr/a", "https://x.fr/b"]);
+        assert_eq!(f.canonical.as_deref(), Some("https://x.fr/a"));
+        let one = facts(r#"<head><link rel="canonical" href="/a"></head>"#);
+        assert_eq!(one.canonicals, vec!["https://x.fr/a"]);
+        assert!(facts("<head></head>").canonicals.is_empty());
     }
 
     #[test]
