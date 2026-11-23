@@ -1,5 +1,6 @@
-//! Requêtes propres de l'application après un crawl terminé : cibles de canonical
-//! jamais demandées par SiteOne, et compression observée sur une page du site.
+//! Requêtes propres de l'application après un crawl terminé : compression observée sur une
+//! page du site, réponse à une adresse inexistante, cibles de canonical jamais demandées par
+//! SiteOne et liens externes.
 
 use std::collections::{BTreeMap, HashSet};
 use std::time::{Duration, Instant};
@@ -10,7 +11,8 @@ use url::Url;
 
 use crate::checks::reference_page;
 use crate::external_links::{check_external_links, external_targets};
-use crate::model::{ExternalCheck, PageRecord};
+use crate::model::{ExternalCheck, NotFoundProbe, PageRecord};
+use crate::not_found_probe::{not_found_url, probe_not_found, random_token};
 use crate::settings::UrlFilter;
 use crate::urls::{is_same_site, normalize_url};
 
@@ -30,6 +32,7 @@ pub struct ProbeEnv<'a> {
 
 pub struct PostCrawl {
     pub content_encoding: Option<String>,
+    pub not_found: Option<NotFoundProbe>,
     pub pages: Vec<PageRecord>,
     pub external: Vec<ExternalCheck>,
     /// Adresses externes non demandées parce que le budget est épuisé (pas après un arrêt).
@@ -193,14 +196,15 @@ pub async fn probe_canonical_targets(
     (added, requests)
 }
 
-/// Compression d'abord (un constat de site), puis cibles de canonical, puis liens
-/// externes (`external_client` à `None` : réglage décoché), dans le budget restant
-/// `max_requests - pages crawlées`.
+/// Compression d'abord (un constat de site), puis adresse inexistante, cibles de canonical et
+/// liens externes (`check_external_links` : le réglage), dans le budget restant
+/// `max_requests - pages crawlées`. `follow_client` suit les redirections.
 pub async fn run_post_crawl_probes(
     env: &ProbeEnv<'_>,
     pages: &[PageRecord],
     max_requests: usize,
-    external_client: Option<&reqwest::Client>,
+    follow_client: &reqwest::Client,
+    check_external_links_setting: bool,
 ) -> PostCrawl {
     let mut budget = max_requests.saturating_sub(pages.len());
     let mut content_encoding = None;
@@ -216,14 +220,25 @@ pub async fn run_post_crawl_probes(
             }
         }
     }
+    let mut not_found = None;
+    let url = not_found_url(env.start, &random_token());
+    if budget > 0 && !env.cancel.is_cancelled() && env.filter.check(url.as_str()).is_ok() {
+        budget -= 1;
+        tokio::select! {
+            _ = tokio::time::sleep(env.min_interval) => {
+                not_found = probe_not_found(follow_client, &url, env.cancel).await;
+            }
+            _ = env.cancel.cancelled() => {}
+        }
+    }
     let (probed, made) = probe_canonical_targets(env, pages, budget).await;
     budget = budget.saturating_sub(made);
 
     let (mut external, mut external_unchecked) = (Vec::new(), 0);
-    if let Some(client) = external_client {
+    if check_external_links_setting {
         let targets = external_targets(pages, env.start);
         (external, _) = check_external_links(
-            client,
+            follow_client,
             &targets,
             budget,
             env.min_interval,
@@ -237,6 +252,7 @@ pub async fn run_post_crawl_probes(
     }
     PostCrawl {
         content_encoding,
+        not_found,
         pages: probed,
         external,
         external_unchecked,

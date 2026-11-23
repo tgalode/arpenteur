@@ -111,7 +111,7 @@ function result(status: CrawlStatus): CrawlResult {
       depth: {},
       redirectChains: {},
     },
-    sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [], robotsTxt: null },
+    sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [], robotsTxt: null, robotsStatus: null },
     externalLinks: [],
     externalUnchecked: 0,
     listSkipped: [],

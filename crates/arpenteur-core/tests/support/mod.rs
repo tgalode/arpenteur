@@ -35,7 +35,27 @@ pub enum Variant {
     /// `/` lie `/p2` et dix routes `/ext-*` sur `localhost` (donc externes : le site écoute sur
     /// `127.0.0.1`) ; `/p2` relie `/ext-404`.
     ExternalLinks,
+    /// Les adresses inexistantes répondent 200 avec la page d'erreur du site.
+    UnknownAnswers200,
+    /// Les adresses inexistantes sont redirigées en 302 vers l'accueil.
+    UnknownRedirectsHome,
+    /// Vraie 404 pour les adresses inexistantes, mais `/fantome` (200) a le title et le H1 de la
+    /// page d'erreur ; `/article-404` parle des erreurs 404 sans les partager.
+    GhostErrorPage,
+    /// `/robots.txt` répond 404, 410 ou 500 ; le reste est le site standard.
+    Robots404,
+    Robots410,
+    Robots500,
+    /// robots.txt interdit l'adresse que la sonde d'adresse inexistante demande.
+    RobotsBlocksNotFound,
+    /// L'adresse inexistante accepte la connexion et ne répond jamais.
+    NotFoundHangs,
 }
+
+/// Début de l'adresse inexistante demandée après le crawl.
+pub const NOT_FOUND_PREFIX: &str = "/arpenteur-introuvable-";
+
+const ERROR_PAGE: &str = r#"<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Page introuvable - Témoin</title></head><body><h1>Oups, page introuvable</h1><p>Cette page n'existe pas.</p></body></html>"#;
 
 /// `Accept-Encoding` envoyé par la sonde de compression.
 pub const PROBE_ACCEPT_ENCODING: &str = "gzip, deflate, br";
@@ -51,6 +71,16 @@ pub struct FixtureSite {
 impl FixtureSite {
     pub fn requested(&self, path: &str) -> bool {
         self.count(path) > 0
+    }
+
+    /// Requêtes dont le chemin commence par `prefix`.
+    pub fn count_prefix(&self, prefix: &str) -> usize {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.starts_with(prefix))
+            .count()
     }
 
     pub fn count(&self, path: &str) -> usize {
@@ -152,6 +182,53 @@ async fn handle(State(st): State<AppState>, headers: HeaderMap, uri: Uri) -> Res
             "br",
         )
             .into_response();
+    }
+    if path.starts_with(NOT_FOUND_PREFIX) {
+        match st.variant {
+            Variant::UnknownAnswers200 => return html(ERROR_PAGE.to_string()),
+            Variant::UnknownRedirectsHome => return redirect(StatusCode::FOUND, "/"),
+            Variant::GhostErrorPage => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                    ERROR_PAGE,
+                )
+                    .into_response();
+            }
+            Variant::NotFoundHangs => {
+                std::future::pending::<()>().await;
+            }
+            _ => {}
+        }
+    }
+    if st.variant == Variant::GhostErrorPage {
+        return match path.as_str() {
+            "/robots.txt" => text("text/plain", "User-agent: *\nAllow: /\n".to_string()),
+            "/" => html(
+                r#"<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Accueil</title></head><body><h1>Accueil</h1><a href="/fantome">f</a> <a href="/article-404">a</a></body></html>"#
+                    .to_string(),
+            ),
+            "/fantome" => html(ERROR_PAGE.to_string()),
+            "/article-404" => html(
+                r#"<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Page introuvable - Témoin</title></head><body><h1>Comprendre l'erreur 404</h1><p>Un article sur les pages introuvables.</p></body></html>"#
+                    .to_string(),
+            ),
+            _ => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
+    if st.variant == Variant::RobotsBlocksNotFound && path == "/robots.txt" {
+        return text(
+            "text/plain",
+            "User-agent: *\nDisallow: /arpenteur-introuvable\n".to_string(),
+        );
+    }
+    if path == "/robots.txt" {
+        match st.variant {
+            Variant::Robots404 => return StatusCode::NOT_FOUND.into_response(),
+            Variant::Robots410 => return StatusCode::GONE.into_response(),
+            Variant::Robots500 => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            _ => {}
+        }
     }
     if st.variant == Variant::ExternalLinks {
         let port = base.rsplit(':').next().unwrap_or_default().to_string();

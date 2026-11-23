@@ -189,13 +189,14 @@ async fn execute(
             let Some(first) = urls.first() else {
                 return Executed::failed(EMPTY_LIST_MESSAGE.to_string());
             };
-            let robots_txt = tokio::select! {
+            let (robots_txt, robots_status) = tokio::select! {
                 r = read_robots_txt(&client, first) => r,
                 _ = cancel.cancelled() => return Executed::new(CrawlStatus::Stopped),
             };
             let filter = UrlFilter::new(settings, robots_txt.as_deref());
             executed.sitemap = SitemapResult {
                 robots_txt,
+                robots_status,
                 ..SitemapResult::default()
             };
             let mut allowed = Vec::new();
@@ -311,6 +312,7 @@ pub async fn run_crawl(
 
     let mut pages = handle.map(|h| h.pages()).unwrap_or_default();
     let mut start_content_encoding = None;
+    let mut not_found_probe = None;
     let (mut external_links, mut external_unchecked) = (Vec::new(), 0);
     if let (CrawlStatus::Completed, Some(start)) = (&status, target.first()) {
         // Après un crawl terminé seulement, au même débit et dans la même limite.
@@ -335,21 +337,21 @@ pub async fn run_crawl(
                     cancel: &cancel,
                     on_external_progress: &report,
                 };
-                let external = settings
-                    .check_external_links
-                    .then(|| external_client(&plain_user_agent(&settings)).ok())
-                    .flatten();
-                let probed = run_post_crawl_probes(
-                    &env,
-                    &pages,
-                    settings.max_requests as usize,
-                    external.as_ref(),
-                )
-                .await;
-                start_content_encoding = probed.content_encoding;
-                external_links = probed.external;
-                external_unchecked = probed.external_unchecked;
-                pages.extend(probed.pages);
+                if let Ok(follow) = external_client(&plain_user_agent(&settings)) {
+                    let probed = run_post_crawl_probes(
+                        &env,
+                        &pages,
+                        settings.max_requests as usize,
+                        &follow,
+                        settings.check_external_links,
+                    )
+                    .await;
+                    start_content_encoding = probed.content_encoding;
+                    not_found_probe = probed.not_found;
+                    external_links = probed.external;
+                    external_unchecked = probed.external_unchecked;
+                    pages.extend(probed.pages);
+                }
             }
         }
         // Les pages sont complètes, les vérifications non : on le dit.
@@ -371,6 +373,7 @@ pub async fn run_crawl(
             external_links,
             external_unchecked,
             list_skipped,
+            not_found_probe,
         },
     ) {
         meta.status = write_failure(e);

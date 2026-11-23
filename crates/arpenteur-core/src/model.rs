@@ -155,6 +155,9 @@ pub struct SitemapResult {
     /// Corps du robots.txt lu pendant la découverte, `None` s'il est absent ou illisible.
     #[serde(default)]
     pub robots_txt: Option<String>,
+    /// Statut reçu pour `/robots.txt`, `None` sans réponse (ou dans un crawl plus ancien).
+    #[serde(default)]
+    pub robots_status: Option<u16>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -218,6 +221,9 @@ pub enum FindingCode {
     H1TooLong,
     CanonicalMultiple,
     ListedUrlError,
+    Soft404,
+    Soft404Site,
+    RobotsTxtMissing,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -328,6 +334,25 @@ pub struct CollectedData {
     /// Mode liste : adresses interdites par robots.txt ou exclues par les motifs.
     #[serde(default)]
     pub list_skipped: Vec<SkippedUrl>,
+    /// Réponse du site à une adresse qui n'existe pas ; `None` : non observée.
+    #[serde(default)]
+    pub not_found_probe: Option<NotFoundProbe>,
+}
+
+/// Ce que le site répond à une adresse inexistante, redirections suivies.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NotFoundProbe {
+    /// Statut final.
+    pub status: u16,
+    /// Vrai si l'adresse finale diffère de l'adresse demandée.
+    pub redirected: bool,
+    pub final_url: String,
+    pub title: Option<String>,
+    /// Premier H1.
+    pub h1: Option<String>,
+    /// Vide quand la page n'a aucun texte.
+    pub text_hash: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

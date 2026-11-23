@@ -23,6 +23,8 @@ struct Fetcher<'a> {
     min_interval: Duration,
     first: bool,
     max_bytes: u64,
+    /// Statut de la dernière réponse reçue.
+    last_status: Option<u16>,
 }
 
 struct Fetched {
@@ -49,6 +51,7 @@ impl Fetcher<'_> {
             .await
             .map_err(|e| FetchError::Other(format!("{url} : {e}")))?;
         let status = response.status();
+        self.last_status = Some(status.as_u16());
         if status == reqwest::StatusCode::NOT_FOUND {
             return Err(FetchError::NotFound);
         }
@@ -108,21 +111,30 @@ impl Fetcher<'_> {
     }
 }
 
-/// Corps du robots.txt du site, sans lire le moindre sitemap ; `None` s'il est absent ou illisible.
-pub async fn read_robots_txt(client: &reqwest::Client, start: &Url) -> Option<String> {
-    let robots_url = Url::parse(&format!(
+/// Corps du robots.txt du site (`None` s'il est absent ou illisible) et statut reçu (`None` sans
+/// réponse), sans lire le moindre sitemap.
+pub async fn read_robots_txt(
+    client: &reqwest::Client,
+    start: &Url,
+) -> (Option<String>, Option<u16>) {
+    let Ok(robots_url) = Url::parse(&format!(
         "{}/robots.txt",
         start.origin().ascii_serialization()
-    ))
-    .ok()?;
+    )) else {
+        return (None, None);
+    };
     let mut fetcher = Fetcher {
         client,
         min_interval: Duration::ZERO,
         first: true,
         max_bytes: MAX_FILE_BYTES,
+        last_status: None,
     };
-    let fetched = fetcher.get(&robots_url).await.ok()?;
-    Some(String::from_utf8_lossy(&fetched.body).into_owned())
+    let fetched = fetcher.get(&robots_url).await;
+    let body = fetched
+        .ok()
+        .map(|f| String::from_utf8_lossy(&f.body).into_owned());
+    (body, fetcher.last_status)
 }
 
 pub async fn discover(
@@ -149,12 +161,14 @@ pub async fn discover_with_limit(
         truncated: false,
         errors: Vec::new(),
         robots_txt: None,
+        robots_status: None,
     };
     let mut fetcher = Fetcher {
         client,
         min_interval,
         first: true,
         max_bytes: max_file_bytes,
+        last_status: None,
     };
     let origin = start.origin().ascii_serialization();
 
@@ -185,6 +199,7 @@ pub async fn discover_with_limit(
         },
         Err(e) => result.errors.push(format!("robots.txt : {e}")),
     }
+    result.robots_status = fetcher.last_status;
 
     let fallback = declared.is_empty();
     if fallback && let Ok(u) = Url::parse(&format!("{origin}/sitemap.xml")) {

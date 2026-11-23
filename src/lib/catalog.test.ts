@@ -19,11 +19,11 @@ test("chaque code de finding-codes.json a une entrée et ses textes", () => {
   }
 });
 
-test("répartition : 8 haute, 16 moyenne, 14 basse, 4 info", () => {
+test("répartition validée : 10 haute, 16 moyenne, 15 basse, 4 info", () => {
   const count = (level: string) => allCodes.filter((c) => CATALOG[c].level === level).length;
-  expect(count("haute")).toBe(8);
+  expect(count("haute")).toBe(10);
   expect(count("moyenne")).toBe(16);
-  expect(count("basse")).toBe(14);
+  expect(count("basse")).toBe(15);
   expect(count("info")).toBe(4);
 });
 
@@ -64,4 +64,25 @@ test("les quatre nouvelles entrées reprennent les textes de la conception", () 
   expect(findingTitle("h1TooLong")).toBe("H1 trop long (plus de 70 caractères)");
   expect(findingWhy("h1TooLong")).toBe("Un titre principal long se lit mal et dilue le sujet de la page.");
   expect(findingFix("h1TooLong")).toBe("Raccourcir le H1 à l'essentiel.");
+});
+
+test("les trois nouvelles entrées reprennent les textes de la conception", () => {
+  expect(CATALOG.soft404.level).toBe("haute");
+  expect(findingTitle("soft404")).toBe("Fausse page d'erreur (soft 404)");
+  expect(findingWhy("soft404")).toBe(
+    "La page affiche le message d'erreur du site, mais répond 200. Google peut l'indexer ou perdre du temps dessus.",
+  );
+  expect(findingFix("soft404")).toBe("Faire répondre 404 ou 410 à cette adresse, ou y remettre un vrai contenu.");
+  expect(CATALOG.soft404Site.level).toBe("haute");
+  expect(findingTitle("soft404Site")).toBe("Le site répond 200 aux adresses inexistantes");
+  expect(findingWhy("soft404Site")).toBe(
+    "Une adresse qui n'existe pas renvoie une page normale au lieu d'une erreur 404. Google ne peut pas distinguer les vraies pages des fausses.",
+  );
+  expect(findingFix("soft404Site")).toBe("Configurer le serveur pour répondre 404 aux adresses inexistantes.");
+  expect(CATALOG.robotsTxtMissing.level).toBe("basse");
+  expect(findingTitle("robotsTxtMissing")).toBe("Fichier robots.txt introuvable");
+  expect(findingWhy("robotsTxtMissing")).toBe("Sans robots.txt, le sitemap n'est pas déclaré aux moteurs.");
+  expect(findingFix("robotsTxtMissing")).toBe(
+    "Ajouter un fichier robots.txt à la racine, avec l'adresse du sitemap.",
+  );
 });

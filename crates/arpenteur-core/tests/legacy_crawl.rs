@@ -214,3 +214,23 @@ fn plan_3_crawl_gains_no_canonical_multiple() {
     let others: Vec<&String> = codes.iter().filter(|c| *c != "HtmlLangMissing").collect();
     assert_eq!(others, PLAN_1_CODES);
 }
+
+/// Un crawl du plan 3 n'a ni sonde d'adresse inexistante ni statut de robots.txt :
+/// ni `soft404`, ni `soft404Site`, ni `robotsTxtMissing`.
+#[test]
+fn plan_3_crawl_gains_no_soft_404_nor_robots_finding() {
+    let mut data: CollectedData = serde_json::from_str(PLAN_1_DATA).unwrap();
+    data.facts_version = 2;
+    assert!(data.not_found_probe.is_none());
+    assert_eq!(data.sitemap.robots_status, None);
+    let result = assemble(meta(), data, None);
+
+    let codes: Vec<String> = result
+        .findings
+        .iter()
+        .map(|f| format!("{:?}", f.code))
+        .collect();
+    for absent in ["Soft404", "Soft404Site", "RobotsTxtMissing"] {
+        assert!(!codes.iter().any(|c| c == absent), "{absent}");
+    }
+}

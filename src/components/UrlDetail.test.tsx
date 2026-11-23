@@ -44,7 +44,7 @@ function result(findings: Finding[], urls: string[]): CrawlResult {
     findings,
     pages: urls.map(page),
     links: { inlinks: {}, depth: {}, redirectChains: {} },
-    sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [], robotsTxt: null },
+    sitemap: { found: false, sources: [], urls: [], truncated: false, errors: [], robotsTxt: null, robotsStatus: null },
     externalLinks: [],
     externalUnchecked: 0,
     listSkipped: [],

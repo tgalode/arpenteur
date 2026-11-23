@@ -1,6 +1,6 @@
 # Arpenteur : catalogue des problèmes
 
-Version 1 · 20 novembre 2026 · statut : validé le 20 novembre, complété avec le plan 3 par `brokenExternalLink`
+Version 1 · 20 novembre 2026 · statut : validé le 20 novembre, complété avec le plan 3 par `brokenExternalLink`, puis de sept entrées avec le plan 4 (`soft404`, `soft404Site`, `listedUrlError`, `canonicalMultiple`, `h1Duplicate`, `h1TooLong`, `robotsTxtMissing`)
 
 Ce catalogue alimente le panneau Problèmes du plan 2. Chaque problème a un identifiant stable, un niveau, un titre, une explication et une correction. Les textes sont écrits pour pouvoir figurer tels quels dans un rapport client.
 
@@ -26,6 +26,8 @@ Les seuils viennent de la conception (D5) et restent réglables.
 | `canonicalToError` | Canonical vers une page en erreur | La page désigne comme référence une adresse qui n'existe pas. Google ignore ce signal. | Pointer le canonical vers l'adresse valide de la page. | nous |
 | `canonicalToRedirect` | Canonical vers une redirection | La page désigne comme référence une adresse qui redirige. Les signaux envoyés à Google se contredisent. | Pointer le canonical vers l'adresse finale. | nous |
 | `listedUrlError` | Adresse de la liste en erreur | Une adresse de la liste répond par une erreur, ou ne répond pas. | Corriger l'adresse, la rediriger ou la retirer. | nous |
+| `soft404` | Fausse page d'erreur (soft 404) | La page affiche le message d'erreur du site, mais répond 200. Google peut l'indexer ou perdre du temps dessus. | Faire répondre 404 ou 410 à cette adresse, ou y remettre un vrai contenu. | nous |
+| `soft404Site` | Le site répond 200 aux adresses inexistantes | Une adresse qui n'existe pas renvoie une page normale au lieu d'une erreur 404. Google ne peut pas distinguer les vraies pages des fausses. | Configurer le serveur pour répondre 404 aux adresses inexistantes. | nous |
 | `sitemapUrlError` | Adresse du sitemap en erreur | Le sitemap annonce à Google une page qui n'existe plus. | Retirer l'adresse du sitemap ou la corriger. | nous |
 | `titleMissing` | Title absent | Google invente un titre pour le résultat de recherche. | Écrire un title unique et descriptif. | nous (à ajouter) |
 | `httpsInvalid` | Certificat HTTPS invalide ou bientôt expiré | Les navigateurs affichent une alerte et les visiteurs repartent. | Renouveler ou corriger le certificat. | SiteOne |
@@ -69,6 +71,7 @@ Les seuils viennent de la conception (D5) et restent réglables.
 | `securityHeadersMissing` | En-têtes de sécurité manquants | Le site est moins protégé contre certaines attaques (HSTS, CSP, X-Frame-Options…). | Ajouter les en-têtes manquants dans la configuration du serveur. | nous |
 | `phoneNotClickable` | Numéro de téléphone non cliquable | Sur mobile, le visiteur ne peut pas appeler en un geste. | Mettre le numéro dans un lien `tel:`. | SiteOne |
 | `modernCompressionMissing` | Compression Brotli absente | Les pages pèsent plus lourd que nécessaire. | Activer Brotli sur le serveur. | SiteOne |
+| `robotsTxtMissing` | Fichier robots.txt introuvable | Sans robots.txt, le sitemap n'est pas déclaré aux moteurs. | Ajouter un fichier robots.txt à la racine, avec l'adresse du sitemap. | nous |
 
 ## Information
 

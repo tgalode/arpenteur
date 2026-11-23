@@ -8,6 +8,7 @@ pub mod html;
 pub mod limit_guard;
 pub mod links;
 pub mod model;
+pub mod not_found_probe;
 pub mod settings;
 pub mod sitemap;
 pub mod siteone;

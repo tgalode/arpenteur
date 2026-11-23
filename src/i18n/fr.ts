@@ -198,6 +198,17 @@ export const fr = {
   finding_h1TooLong_title: "H1 trop long (plus de 70 caractères)",
   finding_h1TooLong_why: "Un titre principal long se lit mal et dilue le sujet de la page.",
   finding_h1TooLong_fix: "Raccourcir le H1 à l'essentiel.",
+  finding_soft404_title: "Fausse page d'erreur (soft 404)",
+  finding_soft404_why:
+    "La page affiche le message d'erreur du site, mais répond 200. Google peut l'indexer ou perdre du temps dessus.",
+  finding_soft404_fix: "Faire répondre 404 ou 410 à cette adresse, ou y remettre un vrai contenu.",
+  finding_soft404Site_title: "Le site répond 200 aux adresses inexistantes",
+  finding_soft404Site_why:
+    "Une adresse qui n'existe pas renvoie une page normale au lieu d'une erreur 404. Google ne peut pas distinguer les vraies pages des fausses.",
+  finding_soft404Site_fix: "Configurer le serveur pour répondre 404 aux adresses inexistantes.",
+  finding_robotsTxtMissing_title: "Fichier robots.txt introuvable",
+  finding_robotsTxtMissing_why: "Sans robots.txt, le sitemap n'est pas déclaré aux moteurs.",
+  finding_robotsTxtMissing_fix: "Ajouter un fichier robots.txt à la racine, avec l'adresse du sitemap.",
   finding_imageTooHeavy_title: "Image lourde (plus de 200 Ko)",
   finding_imageTooHeavy_why: "L'image ralentit le chargement de la page.",
   finding_imageTooHeavy_fix: "Compresser l'image ou la convertir en WebP ou AVIF.",

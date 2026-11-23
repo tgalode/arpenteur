@@ -6,8 +6,8 @@ use url::Url;
 use crate::links::{analyze_links, redirect_target};
 use crate::model::{
     CollectedData, CrawlMeta, CrawlMode, CrawlResult, CrawlStatus, ExternalCheck, ExternalOutcome,
-    FACTS_VERSION, Finding, FindingCode, Indexability, LinkReport, PageFacts, PageRecord,
-    SitemapResult, UrlRow,
+    FACTS_VERSION, Finding, FindingCode, Indexability, LinkReport, NotFoundProbe, PageFacts,
+    PageRecord, SitemapResult, UrlRow,
 };
 use crate::siteone::{SiteOneSummary, site_findings};
 use crate::urls::{is_same_site, normalize_url};
@@ -185,6 +185,8 @@ pub struct CheckInput<'a> {
     /// Mode liste : les adresses de la liste. Les contrôles qui ont besoin du site entier
     /// ne tournent pas, et les constats ne portent que sur les pages de la liste.
     pub list: Option<&'a [String]>,
+    /// Réponse du site à une adresse inexistante ; `None` : non observée.
+    pub not_found: Option<&'a NotFoundProbe>,
 }
 
 impl<'a> CheckInput<'a> {
@@ -204,6 +206,7 @@ impl<'a> CheckInput<'a> {
             throttled: false,
             external_links: &[],
             list: None,
+            not_found: None,
         }
     }
 }
@@ -219,6 +222,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
         throttled,
         external_links,
         list,
+        not_found,
     } = *input;
     let list_mode = list.is_some();
     let listed: BTreeSet<String> = list.unwrap_or_default().iter().map(|u| norm(u)).collect();
@@ -569,6 +573,42 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
         }
     }
 
+    if let Some(probe) = not_found {
+        if probe.status == 200 {
+            let detail = if probe.redirected {
+                format!("redirige vers {}", probe.final_url)
+            } else {
+                "répond 200".to_string()
+            };
+            push(FindingCode::Soft404Site, &site_url, vec![], Some(detail));
+        }
+        if !probe.redirected {
+            let candidates: Vec<&PageRecord> = pages
+                .iter()
+                .filter(|p| is_html_200(p) && is_internal(&p.url) && in_scope(&p.url))
+                .filter(|p| p.facts.is_some())
+                .collect();
+            let ghosts: Vec<&&PageRecord> = candidates
+                .iter()
+                .filter(|p| {
+                    p.facts
+                        .as_ref()
+                        .is_some_and(|f| has_error_page_signature(f, probe))
+                })
+                .collect();
+            // Plus de la moitié des pages : un thème qui répète le nom du site, pas des erreurs.
+            if ghosts.len() * 2 <= candidates.len() {
+                for page in ghosts {
+                    push(FindingCode::Soft404, &page.url, vec![], None);
+                }
+            }
+        }
+    }
+
+    if matches!(sitemap.robots_status, Some(404 | 410)) {
+        push(FindingCode::RobotsTxtMissing, &site_url, vec![], None);
+    }
+
     // Constat de site : il vient d'une requête dédiée, les en-têtes du crawl sont décompressés.
     if let Some(encoding) = start_content_encoding.filter(|v| !has_brotli(v)) {
         push(
@@ -593,6 +633,25 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
 
     out.sort_by_cached_key(|f| (f.code.clone() as usize, f.url.clone()));
     out
+}
+
+/// Title et premier H1 non vides et égaux à ceux de la page d'erreur, ou même texte (non vide).
+fn has_error_page_signature(facts: &PageFacts, probe: &NotFoundProbe) -> bool {
+    let first_h1 = facts.h1.first().map(String::as_str);
+    let same_head = match (
+        collapsed(facts.title.as_deref()),
+        collapsed(first_h1),
+        collapsed(probe.title.as_deref()),
+        collapsed(probe.h1.as_deref()),
+    ) {
+        (Some(title), Some(h1), Some(error_title), Some(error_h1)) => {
+            title == error_title && h1 == error_h1
+        }
+        _ => false,
+    };
+    let same_text =
+        facts.word_count > 0 && !probe.text_hash.is_empty() && facts.text_hash == probe.text_hash;
+    same_head || same_text
 }
 
 fn canonical_finding(
@@ -675,6 +734,7 @@ pub fn assemble(
         throttled: meta.status == CrawlStatus::Throttled,
         external_links: &data.external_links,
         list: (meta.mode == CrawlMode::List).then_some(&meta.list_urls[..]),
+        not_found: data.not_found_probe.as_ref(),
         ..CheckInput::new(&data.pages, &links, &data.sitemap, &meta.start_url)
     });
     if let Some(summary) = &siteone {
@@ -698,7 +758,7 @@ pub fn assemble(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CollectedData, Image, JsonLd, Link, PageFacts};
+    use crate::model::{CollectedData, Image, JsonLd, Link, NotFoundProbe, PageFacts};
 
     const BASE: &str = "https://x.fr";
     const START: &str = "https://x.fr/";
@@ -875,6 +935,7 @@ mod tests {
             truncated: false,
             errors: vec![],
             robots_txt: None,
+            robots_status: None,
         }
     }
 
@@ -2012,6 +2073,9 @@ mod tests {
             H1TooLong => 39,
             CanonicalMultiple => 40,
             ListedUrlError => 41,
+            Soft404 => 42,
+            Soft404Site => 43,
+            RobotsTxtMissing => 44,
         }
     }
 
@@ -2061,6 +2125,9 @@ mod tests {
             H1TooLong,
             CanonicalMultiple,
             ListedUrlError,
+            Soft404,
+            Soft404Site,
+            RobotsTxtMissing,
         ];
         for (i, code) in all.iter().enumerate() {
             assert_eq!(declared_index(code), i, "ordre de déclaration : {code:?}");
@@ -2458,6 +2525,184 @@ mod tests {
                 "{code:?}"
             );
             assert_eq!(found(None).len(), 3, "{code:?}");
+        }
+    }
+
+    fn error_page_probe(title: Option<&str>, h1: Option<&str>, hash: &str) -> NotFoundProbe {
+        NotFoundProbe {
+            status: 404,
+            redirected: false,
+            final_url: full("/arpenteur-introuvable-0123456789abcdef"),
+            title: title.map(Into::into),
+            h1: h1.map(Into::into),
+            text_hash: hash.into(),
+        }
+    }
+
+    fn soft_404_urls(pages: &[PageRecord], probe: Option<&NotFoundProbe>) -> Vec<String> {
+        let links = analyze_links(pages, START);
+        let sm = no_sitemap();
+        let found = run_checks(&CheckInput {
+            not_found: probe,
+            ..CheckInput::new(pages, &links, &sm, START)
+        });
+        urls_of(&found, FindingCode::Soft404)
+    }
+
+    #[test]
+    fn soft_404_needs_title_and_h1_or_the_same_text() {
+        let probe = error_page_probe(Some("Introuvable"), Some("Oups"), "hash-erreur");
+        let page =
+            |path: &str, title: Option<&str>, h1: &[&str]| html(path).title(title).h1_texts(h1);
+        let others = || vec![html("/a").rec(), html("/b").rec(), html("/c").rec()];
+        let with = |extra: PageRecord| {
+            let mut pages = others();
+            pages.push(extra);
+            soft_404_urls(&pages, Some(&probe))
+        };
+
+        // Title et H1 égaux, espaces réduits.
+        assert_eq!(
+            with(page("/x", Some("  Introuvable "), &["Oups\n"]).rec()),
+            vec![full("/x")]
+        );
+        // Même title, autre H1 : rien.
+        assert!(with(page("/x", Some("Introuvable"), &["Autre"]).rec()).is_empty());
+        // Même H1, autre title : rien.
+        assert!(with(page("/x", Some("Autre"), &["Oups"]).rec()).is_empty());
+        // Title ou H1 vide des deux côtés : rien.
+        let empty_title = error_page_probe(None, Some("Oups"), "");
+        let mut pages = others();
+        pages.push(page("/x", None, &["Oups"]).rec());
+        assert!(soft_404_urls(&pages, Some(&empty_title)).is_empty());
+        let empty_h1 = error_page_probe(Some("Introuvable"), None, "");
+        let mut pages = others();
+        pages.push(page("/x", Some("Introuvable"), &[]).rec());
+        assert!(soft_404_urls(&pages, Some(&empty_h1)).is_empty());
+        // Même empreinte de texte : constat, même avec un autre title.
+        assert_eq!(
+            with(
+                page("/x", Some("Autre"), &["Autre"])
+                    .hash("hash-erreur")
+                    .rec()
+            ),
+            vec![full("/x")]
+        );
+        // Empreinte égale mais page sans texte : rien (comme le contenu en double).
+        let mut blank = page("/x", Some("Autre"), &["Autre"])
+            .hash("hash-erreur")
+            .rec();
+        blank.facts.as_mut().unwrap().word_count = 0;
+        assert!(with(blank).is_empty());
+        // Empreinte vide des deux côtés : rien.
+        let no_text = error_page_probe(Some("Autre titre"), Some("Autre h1"), "");
+        let mut pages = others();
+        pages.push(page("/x", Some("Z"), &["Z"]).hash("").rec());
+        assert!(soft_404_urls(&pages, Some(&no_text)).is_empty());
+    }
+
+    #[test]
+    fn soft_404_only_on_internal_html_200_and_without_redirected_probe() {
+        let probe = error_page_probe(Some("Introuvable"), Some("Oups"), "hash-erreur");
+        let ghost = |path: &str| html(path).title(Some("Introuvable")).h1_texts(&["Oups"]);
+        let base = vec![html("/a").rec(), html("/b").rec(), html("/c").rec()];
+        let run = |extra: PageRecord, probe: Option<&NotFoundProbe>| {
+            let mut pages = base.clone();
+            pages.push(extra);
+            soft_404_urls(&pages, probe)
+        };
+        let mut gone = ghost("/x").rec();
+        gone.status = 404;
+        assert!(run(gone, Some(&probe)).is_empty());
+        let mut asset = ghost("/x").rec();
+        asset.content_type = "other".into();
+        assert!(run(asset, Some(&probe)).is_empty());
+        let mut external = ghost("/x").rec();
+        external.url = "https://autre.fr/x".into();
+        assert!(run(external, Some(&probe)).is_empty());
+        // Sonde redirigée ou absente : aucun constat de page.
+        let redirected = NotFoundProbe {
+            redirected: true,
+            ..probe.clone()
+        };
+        assert!(run(ghost("/x").rec(), Some(&redirected)).is_empty());
+        assert!(run(ghost("/x").rec(), None).is_empty());
+        assert_eq!(run(ghost("/x").rec(), Some(&probe)), vec![full("/x")]);
+    }
+
+    #[test]
+    fn signature_shared_by_most_pages_is_not_a_soft_404() {
+        let probe = error_page_probe(Some("Témoin"), Some("Témoin"), "hash-erreur");
+        let themed = |path: &str| html(path).title(Some("Témoin")).h1_texts(&["Témoin"]).rec();
+        // 3 pages sur 4 : un thème qui met le nom du site partout.
+        let pages = vec![
+            themed("/a"),
+            themed("/b"),
+            themed("/c"),
+            html("/d").title(Some("Autre")).h1_texts(&["Autre"]).rec(),
+        ];
+        assert!(soft_404_urls(&pages, Some(&probe)).is_empty());
+        // Exactement la moitié : pas plus de la moitié, donc signalées.
+        let pages = vec![
+            themed("/a"),
+            themed("/b"),
+            html("/c").title(Some("C")).h1_texts(&["C"]).rec(),
+            html("/d").title(Some("D")).h1_texts(&["D"]).rec(),
+        ];
+        assert_eq!(
+            soft_404_urls(&pages, Some(&probe)),
+            vec![full("/a"), full("/b")]
+        );
+    }
+
+    #[test]
+    fn soft_404_site_detail_follows_the_probe() {
+        let pages = vec![html("/").rec()];
+        let links = analyze_links(&pages, START);
+        let sm = no_sitemap();
+        let found = |probe: &NotFoundProbe| {
+            run_checks(&CheckInput {
+                not_found: Some(probe),
+                ..CheckInput::new(&pages, &links, &sm, START)
+            })
+        };
+        let mut probe = error_page_probe(None, None, "");
+        probe.status = 200;
+        let f = found(&probe);
+        let site = of(&f, FindingCode::Soft404Site);
+        assert_eq!(site.len(), 1);
+        assert_eq!(site[0].url, START);
+        assert_eq!(site[0].detail.as_deref(), Some("répond 200"));
+        probe.redirected = true;
+        probe.final_url = full("/");
+        let f = found(&probe);
+        assert_eq!(
+            of(&f, FindingCode::Soft404Site)[0].detail.as_deref(),
+            Some("redirige vers https://x.fr/")
+        );
+        // Redirigé vers une vraie erreur, ou erreur directe : pas de constat de site.
+        probe.status = 404;
+        assert!(of(&found(&probe), FindingCode::Soft404Site).is_empty());
+        probe.redirected = false;
+        assert!(of(&found(&probe), FindingCode::Soft404Site).is_empty());
+        let f = check(&pages, &no_sitemap());
+        assert!(of(&f, FindingCode::Soft404Site).is_empty());
+    }
+
+    #[test]
+    fn robots_txt_missing_only_on_404_or_410() {
+        let pages = vec![html("/").rec()];
+        let with_status = |status: Option<u16>| {
+            let sm = SitemapResult {
+                robots_status: status,
+                ..SitemapResult::default()
+            };
+            urls_of(&check(&pages, &sm), FindingCode::RobotsTxtMissing)
+        };
+        assert_eq!(with_status(Some(404)), vec![START.to_string()]);
+        assert_eq!(with_status(Some(410)), vec![START.to_string()]);
+        for other in [Some(500), Some(403), Some(200), None] {
+            assert!(with_status(other).is_empty(), "{other:?}");
         }
     }
 }

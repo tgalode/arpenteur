@@ -77,6 +77,7 @@ export interface SitemapResult {
   truncated: boolean;
   errors: string[];
   robotsTxt: string | null;
+  robotsStatus: number | null;
 }
 
 export interface InLink {
@@ -133,7 +134,10 @@ export type FindingCode =
   | "h1Duplicate"
   | "h1TooLong"
   | "canonicalMultiple"
-  | "listedUrlError";
+  | "listedUrlError"
+  | "soft404"
+  | "soft404Site"
+  | "robotsTxtMissing";
 
 export interface Finding {
   code: FindingCode;

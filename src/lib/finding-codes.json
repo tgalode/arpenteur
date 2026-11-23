@@ -40,5 +40,8 @@
   "h1Duplicate",
   "h1TooLong",
   "canonicalMultiple",
-  "listedUrlError"
+  "listedUrlError",
+  "soft404",
+  "soft404Site",
+  "robotsTxtMissing"
 ]

@@ -446,6 +446,11 @@ async fn probe_targets_with(
     probe_canonical_targets(&env, pages, budget).await.0
 }
 
+fn follow_client() -> reqwest::Client {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    arpenteur_core::external_links::external_client("Arpenteur-test").unwrap()
+}
+
 async fn post_probes(
     client: &reqwest::Client,
     start: &Url,
@@ -454,7 +459,33 @@ async fn post_probes(
     min_interval: Duration,
     cancel: &CancellationToken,
 ) -> PostCrawl {
-    let filter = UrlFilter::new(&CrawlSettings::default(), None);
+    post_probes_with(
+        client,
+        &follow_client(),
+        false,
+        None,
+        start,
+        pages,
+        max_requests,
+        min_interval,
+        cancel,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn post_probes_with(
+    client: &reqwest::Client,
+    follow: &reqwest::Client,
+    check_external: bool,
+    robots_txt: Option<&str>,
+    start: &Url,
+    pages: &[arpenteur_core::model::PageRecord],
+    max_requests: usize,
+    min_interval: Duration,
+    cancel: &CancellationToken,
+) -> PostCrawl {
+    let filter = UrlFilter::new(&CrawlSettings::default(), robots_txt);
     let env = ProbeEnv {
         client,
         start,
@@ -463,7 +494,7 @@ async fn post_probes(
         cancel,
         on_external_progress: &|_, _| {},
     };
-    run_post_crawl_probes(&env, pages, max_requests, None).await
+    run_post_crawl_probes(&env, pages, max_requests, follow, check_external).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -660,11 +691,18 @@ async fn post_crawl_probes_share_one_budget() {
     // Un seul slot : la compression passe d'abord, la cible n'est pas demandée.
     let r = run(3, CancellationToken::new()).await;
     assert_eq!(r.content_encoding.as_deref(), Some(""));
-    assert!(r.pages.is_empty());
+    assert!(r.pages.is_empty() && r.not_found.is_none());
     assert_eq!(site.count("/"), 1);
+    assert_eq!(site.count_prefix(support::NOT_FOUND_PREFIX), 0);
     assert_eq!(site.count("/canon-target"), 0);
 
+    // Deux slots : l'adresse inexistante passe avant la cible de canonical.
     let r = run(4, CancellationToken::new()).await;
+    assert!(r.not_found.is_some() && r.pages.is_empty());
+    assert_eq!(site.count_prefix(support::NOT_FOUND_PREFIX), 1);
+    assert_eq!(site.count("/canon-target"), 0);
+
+    let r = run(5, CancellationToken::new()).await;
     assert_eq!(r.pages.len(), 1);
     assert_eq!(site.count("/canon-target"), 1);
 }
@@ -1275,9 +1313,10 @@ async fn completed_crawl_checks_external_links_once_each() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn crawl_budget_leaves_links_unchecked() {
-    // 2 pages crawlées + 1 compression + 0 canonical : 4 requêtes restent pour 10 liens.
+    // 2 pages crawlées + 1 compression + 1 adresse inexistante + 0 canonical :
+    // 4 requêtes restent pour 10 liens.
     let settings = CrawlSettings {
-        max_requests: 7,
+        max_requests: 8,
         ..fast_settings()
     };
     let (site, store, loc, meta, _root) = crawl_external(settings, false).await;
@@ -1544,4 +1583,216 @@ async fn list_mode_image_of_a_listed_page_is_not_off_list() {
     let r = store.load_result(&loc.domain, &loc.id).unwrap();
     assert!(!row(&r, "/img/big.jpg").off_list);
     assert!(!row(&r, "/b").off_list);
+}
+
+// Fausses pages d'erreur et robots.txt
+
+fn detail_of(r: &CrawlResult, code: FindingCode, path: &str) -> Option<String> {
+    r.findings
+        .iter()
+        .find(|f| f.code == code && path_of(&f.url) == path)
+        .and_then(|f| f.detail.clone())
+}
+
+fn count_of(r: &CrawlResult, code: FindingCode) -> usize {
+    r.findings.iter().filter(|f| f.code == code).count()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn site_answering_200_to_unknown_urls() {
+    let (site, store, loc, meta, _root) =
+        run(Variant::UnknownAnswers200, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    assert_eq!(site.count_prefix(support::NOT_FOUND_PREFIX), 1);
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    let probe = data.not_found_probe.unwrap();
+    assert_eq!((probe.status, probe.redirected), (200, false));
+    assert_eq!(probe.title.as_deref(), Some("Page introuvable - Témoin"));
+    assert_eq!(probe.h1.as_deref(), Some("Oups, page introuvable"));
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    assert!(has(&r, FindingCode::Soft404Site, "/"));
+    assert_eq!(
+        detail_of(&r, FindingCode::Soft404Site, "/").as_deref(),
+        Some("répond 200")
+    );
+    assert_eq!(count_of(&r, FindingCode::Soft404), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn site_redirecting_unknown_urls_to_home() {
+    let (site, store, loc, meta, _root) =
+        run(Variant::UnknownRedirectsHome, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    assert_eq!(site.count_prefix(support::NOT_FOUND_PREFIX), 1);
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    assert_eq!(
+        detail_of(&r, FindingCode::Soft404Site, "/"),
+        Some(format!("redirige vers {}/", site.base))
+    );
+    assert_eq!(count_of(&r, FindingCode::Soft404), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn page_with_the_error_page_signature_is_a_soft_404() {
+    let (_site, store, loc, meta, _root) =
+        run(Variant::GhostErrorPage, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert_eq!(data.not_found_probe.unwrap().status, 404);
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    assert!(has(&r, FindingCode::Soft404, "/fantome"));
+    // Même title que la page d'erreur mais un autre H1 : un article, pas une fausse erreur.
+    assert!(!has(&r, FindingCode::Soft404, "/article-404"));
+    assert_eq!(count_of(&r, FindingCode::Soft404), 1);
+    assert_eq!(count_of(&r, FindingCode::Soft404Site), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn not_found_probe_shares_the_budget_and_respects_robots() {
+    let site = start_fixture_site(Variant::ExternalLinks).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let port = site.base.rsplit(':').next().unwrap().to_string();
+    let pages = vec![
+        page_linking(
+            &format!("{}/", site.base),
+            &[&format!("http://localhost:{port}/ext-ok")],
+        ),
+        fixture_page(
+            &format!("{}/x", site.base),
+            200,
+            Some(&format!("{}/canon-target", site.base)),
+        ),
+    ];
+    let journal = || site.requests.lock().unwrap().clone();
+    let all = |max: usize, robots: Option<&'static str>, cancel: CancellationToken| {
+        let (pages, start) = (pages.clone(), start.clone());
+        async move {
+            post_probes_with(
+                &probe_client(),
+                &follow_client(),
+                true,
+                robots,
+                &start,
+                &pages,
+                max,
+                Duration::ZERO,
+                &cancel,
+            )
+            .await
+        }
+    };
+
+    // Ordre : compression, adresse inexistante, cible de canonical, liens externes.
+    let r = all(100, None, CancellationToken::new()).await;
+    assert!(r.not_found.is_some());
+    let log = journal();
+    assert_eq!(log.len(), 4);
+    assert_eq!(log[0], "/");
+    assert!(log[1].starts_with(support::NOT_FOUND_PREFIX));
+    assert_eq!(log[2], "/canon-target");
+    assert_eq!(log[3], "/ext-ok");
+    let token = log[1].trim_start_matches(support::NOT_FOUND_PREFIX);
+    assert_eq!(token.len(), 16);
+    assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+
+    // Budget d'une requête : la compression seule.
+    site.requests.lock().unwrap().clear();
+    let r = all(3, None, CancellationToken::new()).await;
+    assert!(r.not_found.is_none() && r.content_encoding.is_some());
+    assert_eq!(site.count_prefix(support::NOT_FOUND_PREFIX), 0);
+
+    // Adresse interdite par robots.txt : pas de sonde.
+    site.requests.lock().unwrap().clear();
+    let robots = Some("User-agent: *\nDisallow: /arpenteur-introuvable\n");
+    let r = all(100, robots, CancellationToken::new()).await;
+    assert!(r.not_found.is_none());
+    assert_eq!(site.count_prefix(support::NOT_FOUND_PREFIX), 0);
+    assert_eq!(site.count("/canon-target"), 1);
+
+    // Crawl arrêté : pas de sonde.
+    site.requests.lock().unwrap().clear();
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    let r = all(100, None, cancelled).await;
+    assert!(r.not_found.is_none());
+    assert!(journal().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn not_found_probe_is_none_on_timeout_and_cancel() {
+    use arpenteur_core::not_found_probe::{not_found_url, probe_not_found};
+    let site = start_fixture_site(Variant::NotFoundHangs).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let url = not_found_url(&start, "0123456789abcdef");
+    assert_eq!(
+        url.as_str(),
+        format!("{}/arpenteur-introuvable-0123456789abcdef", site.base)
+    );
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let short = arpenteur_core::external_links::external_client_with_timeout(
+        "Arpenteur-test",
+        Duration::from_millis(300),
+    )
+    .unwrap();
+    let live = CancellationToken::new();
+    assert_eq!(probe_not_found(&short, &url, &live).await, None);
+    assert_eq!(site.count_prefix(support::NOT_FOUND_PREFIX), 1);
+
+    // Annulé pendant la lecture : rien non plus.
+    let cancel = CancellationToken::new();
+    let canceller = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        canceller.cancel();
+    });
+    let began = Instant::now();
+    assert_eq!(probe_not_found(&follow_client(), &url, &cancel).await, None);
+    assert!(began.elapsed() < Duration::from_secs(4));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn not_found_probe_is_not_sent_when_robots_forbids_it() {
+    let (site, store, loc, meta, _root) =
+        run(Variant::RobotsBlocksNotFound, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    assert_eq!(site.count_prefix(support::NOT_FOUND_PREFIX), 0);
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    assert!(data.not_found_probe.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn robots_status_is_recorded_and_missing_only_on_404_or_410() {
+    for (variant, status, missing) in [
+        (Variant::Robots404, 404, true),
+        (Variant::Robots410, 410, true),
+        (Variant::Robots500, 500, false),
+        (Variant::Standard, 200, false),
+    ] {
+        let (_site, store, loc, meta, _root) = run(variant, |_| Arc::new(NoEvents)).await;
+        assert_eq!(meta.status, CrawlStatus::Completed);
+        let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+        assert_eq!(data.sitemap.robots_status, Some(status));
+        let r = store.load_result(&loc.domain, &loc.id).unwrap();
+        assert_eq!(
+            has(&r, FindingCode::RobotsTxtMissing, "/"),
+            missing,
+            "{status}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_mode_records_the_robots_status() {
+    for (variant, status, missing) in [
+        (Variant::Robots404, 404, true),
+        (Variant::Robots500, 500, false),
+    ] {
+        let (_site, store, loc, meta, _root) =
+            run_list(variant, fast_settings(), &["/", "/a"]).await;
+        assert_eq!(meta.status, CrawlStatus::Completed);
+        let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+        assert_eq!(data.sitemap.robots_status, Some(status));
+        let r = store.load_result(&loc.domain, &loc.id).unwrap();
+        assert_eq!(has(&r, FindingCode::RobotsTxtMissing, "/"), missing);
+    }
 }
