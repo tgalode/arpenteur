@@ -30,6 +30,7 @@ export const fr = {
   robotsNoSitemaps: "aucun sitemap déclaré",
   robotsBlockedHeading: "adresses bloquées",
   robotsBlockedUnknown: "liste disponible pour un crawl terminé",
+  robotsBlockedUnavailable: "liste indisponible pour ce crawl",
   robotsNoneBlocked: "aucune adresse bloquée",
   robotsFoundOn: "trouvée sur {url}",
   robotsNoSource: "page source inconnue",

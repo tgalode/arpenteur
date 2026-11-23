@@ -603,14 +603,23 @@ select {
   min-height: 0;
 }
 
-.crawl-body[hidden] {
-  display: none;
+.crawl-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.crawl-stage > .crawl-body {
+  flex: 1;
 }
 
 .robots {
-  flex: 1;
-  min-height: 0;
-  margin: 12px;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  margin: 0;
+  background: var(--bg);
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius);

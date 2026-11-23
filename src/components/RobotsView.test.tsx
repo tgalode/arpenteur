@@ -18,8 +18,8 @@ function robots(over: Partial<RobotsReport> = {}): RobotsReport {
   };
 }
 
-function view(over: Partial<RobotsReport> = {}, onClose = () => {}) {
-  render(<RobotsView robots={robots(over)} onClose={onClose} />);
+function view(over: Partial<RobotsReport> = {}, onClose = () => {}, finished = true) {
+  render(<RobotsView robots={robots(over)} finished={finished} onClose={onClose} />);
   return within(screen.getByRole("region", { name: "robots.txt" }));
 }
 
@@ -46,10 +46,24 @@ test("un fichier absent affiche « introuvable »", () => {
   expect(v.getByText("aucun sitemap déclaré")).toBeTruthy();
 });
 
-test("sans rapport SiteOne, la vue dit que la liste est disponible pour un crawl terminé", () => {
-  const v = view({ blockedKnown: false, blocked: [] });
+test("sans rapport SiteOne sur un crawl non terminé, la vue dit que la liste est disponible pour un crawl terminé", () => {
+  const v = view({ blockedKnown: false, blocked: [] }, () => {}, false);
   expect(v.getByText("liste disponible pour un crawl terminé")).toBeTruthy();
+  expect(v.queryByText("liste indisponible pour ce crawl")).toBeNull();
   expect(v.queryByText("aucune adresse bloquée")).toBeNull();
+});
+
+test("sans rapport lisible sur un crawl terminé, la vue dit que la liste est indisponible", () => {
+  const v = view({ blockedKnown: false, blocked: [] }, () => {}, true);
+  expect(v.getByText("liste indisponible pour ce crawl")).toBeTruthy();
+  expect(v.queryByText("liste disponible pour un crawl terminé")).toBeNull();
+});
+
+test("si robots.txt n’est pas respecté, une liste non vide n’est pas montrée", () => {
+  const v = view({ respected: false });
+  expect(v.getByText(/rien n’a été bloqué/)).toBeTruthy();
+  expect(v.queryByRole("list", { name: "adresses bloquées" })).toBeNull();
+  expect(v.queryByText("https://exemple.fr/prive?x=1")).toBeNull();
 });
 
 test("une liste connue et vide dit qu'aucune adresse n'a été bloquée", () => {
@@ -59,7 +73,7 @@ test("une liste connue et vide dit qu'aucune adresse n'a été bloquée", () => 
 });
 
 test("en mode liste sans rapport, les adresses connues sont listées sans page source", () => {
-  const v = view({ blockedKnown: false, blocked: [{ url: "https://exemple.fr/prive", foundOn: null }] });
+  const v = view({ blockedKnown: false, blocked: [{ url: "https://exemple.fr/prive", foundOn: null }] }, () => {}, false);
   expect(v.getByText("https://exemple.fr/prive")).toBeTruthy();
   expect(v.getByText("page source inconnue")).toBeTruthy();
   expect(v.getByText("liste disponible pour un crawl terminé")).toBeTruthy();

@@ -302,8 +302,8 @@ export function Crawl({
               {t("provisional")}
             </p>
           )}
-          {result && robotsOpen && <RobotsView robots={result.robots} onClose={closeRobots} />}
-          <div className="crawl-body" hidden={robotsOpen}>
+          <div className="crawl-stage">
+          <div className="crawl-body" inert={robotsOpen}>
             <ProblemsPanel
               findings={findings}
               rows={rows}
@@ -336,6 +336,10 @@ export function Crawl({
               />
               {result && selected && <UrlDetail row={selected} result={result} />}
             </div>
+          </div>
+          {result && robotsOpen && (
+            <RobotsView robots={result.robots} finished={result.meta.status.kind === "completed"} onClose={closeRobots} />
+          )}
           </div>
         </>
       )}

@@ -493,6 +493,25 @@ test("« robots.txt » ouvre la vue, Échap la ferme et le focus revient au bout
   expect(document.activeElement).toBe(button);
 });
 
+test("la vue robots.txt se pose sur le corps du crawl sans le retirer ni le masquer", async () => {
+  const user = userEvent.setup();
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
+  const { container } = render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  const button = await screen.findByRole("button", { name: "robots.txt" });
+  const body = container.querySelector(".crawl-body");
+  const table = screen.getByRole("table");
+  expect(body).not.toBeNull();
+  expect(body?.hasAttribute("inert")).toBe(false);
+  await user.click(button);
+  expect(container.querySelector(".crawl-body")).toBe(body);
+  expect(body?.hasAttribute("hidden")).toBe(false);
+  expect(body?.hasAttribute("inert")).toBe(true);
+  await user.click(screen.getByRole("button", { name: "fermer" }));
+  expect(container.querySelector(".crawl-body")).toBe(body);
+  expect(body?.hasAttribute("inert")).toBe(false);
+  expect(screen.getByRole("table")).toBe(table);
+});
+
 test("exporter les URL propose <domaine>-<id>-urls.csv avec toutes les lignes", async () => {
   const r = result({ kind: "completed" });
   vi.mocked(api.loadCrawl).mockResolvedValue(r);

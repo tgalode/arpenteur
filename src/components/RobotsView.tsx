@@ -2,7 +2,16 @@ import { useEffect, useRef } from "react";
 import { t } from "../i18n/fr";
 import type { RobotsReport } from "../lib/types";
 
-export function RobotsView({ robots, onClose }: { robots: RobotsReport; onClose: () => void }) {
+export function RobotsView({
+  robots,
+  finished,
+  onClose,
+}: {
+  robots: RobotsReport;
+  /** Le crawl est terminé : sans rapport SiteOne lisible, la liste ne viendra pas. */
+  finished: boolean;
+  onClose: () => void;
+}) {
   const rootRef = useRef<HTMLElement>(null);
   useEffect(() => rootRef.current?.focus(), []);
 
@@ -48,8 +57,6 @@ export function RobotsView({ robots, onClose }: { robots: RobotsReport; onClose:
 
       <h3>{t("robotsBlockedHeading")}</h3>
       {!robots.respected && <p className="dim">{t("robotsNotRespected")}</p>}
-      {unknown && <p className="dim">{t("robotsBlockedUnknown")}</p>}
-      {none && <p className="dim">{t("robotsNoneBlocked")}</p>}
       {robots.respected && robots.blocked.length > 0 && (
         <ul aria-label={t("robotsBlockedHeading")}>
           {robots.blocked.map((b) => (
@@ -60,6 +67,8 @@ export function RobotsView({ robots, onClose }: { robots: RobotsReport; onClose:
           ))}
         </ul>
       )}
+      {unknown && <p className="dim">{finished ? t("robotsBlockedUnavailable") : t("robotsBlockedUnknown")}</p>}
+      {none && <p className="dim">{t("robotsNoneBlocked")}</p>}
       <p className="dim">{t("robotsFilesNote")}</p>
     </section>
   );
