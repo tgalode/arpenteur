@@ -103,7 +103,9 @@ Le catalogue passe à 45 codes : 10 en haute, 16 en moyenne, 15 en basse, 4 en i
 - **Sa place dans le budget.** Compression, soft 404, cibles de canonical, liens externes. Elle compte pour une requête. Si l'adresse tirée est interdite par robots.txt, la sonde n'a pas lieu.
 - **`soft404Site`.** La réponse finale est 200, directement ou après redirection. Le détail dit lequel : « répond 200 » ou « redirige vers … ».
 - **`soft404`.** Une page interne, HTML, en 200, qui a le même title et le même premier H1 que la page reçue par la sonde (tous deux non vides), ou la même empreinte de texte. Ce contrôle ne tourne que si la sonde a reçu sa réponse sans redirection : si le site redirige les adresses inexistantes vers l'accueil, seul `soft404Site` existe. Une page n'est jamais comparée à elle-même.
-- **Garde-fou.** Si plus de la moitié des pages du site ont le title et le H1 de la page d'erreur, aucune n'est signalée : c'est un thème qui met le nom du site partout, pas une série de fausses pages d'erreur.
+- **Garde-fous.** Deux cas où aucune page n'est signalée, parce que la page d'erreur porte simplement l'habillage du site :
+  - la page de départ elle-même ressemble à la page d'erreur (même title et même H1, ou même texte) ;
+  - plus de la moitié des pages du site lui ressemblent.
 - **Sans réponse de la sonde** (délai dépassé, erreur réseau, crawl arrêté) : aucun des deux constats.
 - **L'enregistrement.** Le résultat de la sonde (statut, adresse finale, title, H1, empreinte) va dans les données du crawl.
 
@@ -231,3 +233,4 @@ Chacun est suivi de ce qu'il coûte s'il est faux.
 15. **La liste des adresses bloquées vient de SiteOne seul.** Elle manque pour un crawl arrêté et ignore les fichiers. Si c'est faux : un calcul à nous, à ajouter.
 16. **Les deux contrôles de H1 valent aussi pour les anciens crawls.** Si c'est faux : les réserver aux nouveaux crawls.
 17. **Aucun soft 404 n'est signalé quand plus de la moitié des pages ressemblent à la page d'erreur.** Si c'est faux : un site réellement rempli de fausses pages d'erreur n'a que le constat de site.
+18. **Aucun soft 404 n'est signalé quand la page de départ ressemble à la page d'erreur** (ajout pendant l'implémentation : sur un site de deux pages, l'accueil aurait été signalé). Si c'est faux : une fausse page d'erreur passe inaperçue sur ces sites.
