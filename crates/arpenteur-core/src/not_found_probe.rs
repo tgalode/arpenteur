@@ -79,10 +79,15 @@ pub async fn probe_not_found(
             text_hash = facts.text_hash;
         }
     }
+    let redirected = final_url != *url;
+    // Ni paramètres ni fragment : une page de connexion peut y porter un jeton.
+    let mut shown = final_url;
+    shown.set_query(None);
+    shown.set_fragment(None);
     Some(NotFoundProbe {
         status,
-        redirected: final_url != *url,
-        final_url: final_url.to_string(),
+        redirected,
+        final_url: shown.to_string(),
         title,
         h1,
         text_hash,

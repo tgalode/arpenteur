@@ -592,9 +592,14 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
             push(FindingCode::Soft404Site, &site_url, vec![], Some(detail));
         }
         // La page de départ au gabarit de la page d'erreur : le site porte son habillage partout.
-        let start_like_error = reference_page(pages, start_url)
-            .and_then(|p| p.facts.as_ref())
-            .is_some_and(|f| has_error_page_signature(f, probe));
+        let reference_facts = reference_page(pages, start_url).and_then(|p| p.facts.as_ref());
+        // Même premier H1 que l'accueil : c'est l'habillage, seule l'empreinte du texte compte.
+        let branding_h1 = reference_facts.is_some_and(|f| {
+            let h1 = collapsed(f.h1.first().map(String::as_str));
+            h1.is_some() && h1 == collapsed(probe.h1.as_deref())
+        });
+        let start_like_error =
+            reference_facts.is_some_and(|f| has_error_page_signature(f, probe, !branding_h1));
         if !probe.redirected && !start_like_error {
             let candidates: Vec<&PageRecord> = pages
                 .iter()
@@ -606,7 +611,7 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
                 .filter(|p| {
                     p.facts
                         .as_ref()
-                        .is_some_and(|f| has_error_page_signature(f, probe))
+                        .is_some_and(|f| has_error_page_signature(f, probe, !branding_h1))
                 })
                 .collect();
             // Plus de la moitié des pages : un thème qui répète le nom du site, pas des erreurs.
@@ -648,20 +653,22 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
     out
 }
 
-/// Title et premier H1 non vides et égaux à ceux de la page d'erreur, ou même texte (non vide).
-fn has_error_page_signature(facts: &PageFacts, probe: &NotFoundProbe) -> bool {
+/// Title et premier H1 non vides et égaux à ceux de la page d'erreur (si `with_head`), ou même
+/// texte (non vide).
+fn has_error_page_signature(facts: &PageFacts, probe: &NotFoundProbe, with_head: bool) -> bool {
     let first_h1 = facts.h1.first().map(String::as_str);
-    let same_head = match (
-        collapsed(facts.title.as_deref()),
-        collapsed(first_h1),
-        collapsed(probe.title.as_deref()),
-        collapsed(probe.h1.as_deref()),
-    ) {
-        (Some(title), Some(h1), Some(error_title), Some(error_h1)) => {
-            title == error_title && h1 == error_h1
-        }
-        _ => false,
-    };
+    let same_head = with_head
+        && match (
+            collapsed(facts.title.as_deref()),
+            collapsed(first_h1),
+            collapsed(probe.title.as_deref()),
+            collapsed(probe.h1.as_deref()),
+        ) {
+            (Some(title), Some(h1), Some(error_title), Some(error_h1)) => {
+                title == error_title && h1 == error_h1
+            }
+            _ => false,
+        };
     let same_text =
         facts.word_count > 0 && !probe.text_hash.is_empty() && facts.text_hash == probe.text_hash;
     same_head || same_text
@@ -2824,6 +2831,48 @@ mod tests {
         let mut pages = others();
         pages.push(page("/x", Some("Z"), &["Z"]).hash("").rec());
         assert!(soft_404_urls(&pages, Some(&no_text)).is_empty());
+    }
+
+    #[test]
+    fn soft_404_ignores_the_h1_when_it_is_the_site_branding() {
+        // Le premier H1 de la page d'erreur est aussi celui de l'accueil : un logo.
+        let probe = error_page_probe(Some("Introuvable"), Some(" Marque "), "hash-erreur");
+        let branded = |path: &str| html(path).title(Some(path)).h1_texts(&["Marque"]);
+        // Même title et même H1 de marque mais un autre texte : rien.
+        let pages = vec![
+            branded("/").rec(),
+            branded("/contact").rec(),
+            branded("/b").rec(),
+            html("/x")
+                .title(Some("Introuvable"))
+                .h1_texts(&["Marque"])
+                .rec(),
+        ];
+        assert!(soft_404_urls(&pages, Some(&probe)).is_empty());
+        // La même empreinte de texte reste signalée.
+        let pages = vec![
+            branded("/").rec(),
+            branded("/contact").rec(),
+            branded("/b").rec(),
+            html("/x")
+                .title(Some("Autre"))
+                .h1_texts(&["Marque"])
+                .hash("hash-erreur")
+                .rec(),
+        ];
+        assert_eq!(soft_404_urls(&pages, Some(&probe)), vec![full("/x")]);
+        // Un accueil dont le H1 diffère de celui de la sonde : title et H1 comptent.
+        let own_h1 = |path: &str| html(path).title(Some(path)).h1_texts(&[path]);
+        let pages = vec![
+            own_h1("/").rec(),
+            own_h1("/contact").rec(),
+            own_h1("/b").rec(),
+            html("/x")
+                .title(Some("Introuvable"))
+                .h1_texts(&["Marque"])
+                .rec(),
+        ];
+        assert_eq!(soft_404_urls(&pages, Some(&probe)), vec![full("/x")]);
     }
 
     #[test]

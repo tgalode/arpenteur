@@ -41,6 +41,8 @@ pub enum Variant {
     UnknownAnswers200,
     /// Les adresses inexistantes sont redirigées en 302 vers l'accueil.
     UnknownRedirectsHome,
+    /// Les adresses inexistantes sont redirigées vers `/connexion?state=abc#x` (200).
+    UnknownRedirectsToLogin,
     /// Vraie 404 pour les adresses inexistantes, mais `/fantome` (200) a le title et le H1 de la
     /// page d'erreur ; `/article-404` parle des erreurs 404 sans les partager.
     GhostErrorPage,
@@ -187,10 +189,16 @@ async fn handle(State(st): State<AppState>, headers: HeaderMap, uri: Uri) -> Res
         )
             .into_response();
     }
+    if st.variant == Variant::UnknownRedirectsToLogin && path == "/connexion" {
+        return html(ERROR_PAGE.to_string());
+    }
     if path.starts_with(NOT_FOUND_PREFIX) {
         match st.variant {
             Variant::UnknownAnswers200 => return html(ERROR_PAGE.to_string()),
             Variant::UnknownRedirectsHome => return redirect(StatusCode::FOUND, "/"),
+            Variant::UnknownRedirectsToLogin => {
+                return redirect(StatusCode::FOUND, "/connexion?state=abc#x");
+            }
             Variant::GhostErrorPage => {
                 return (
                     StatusCode::NOT_FOUND,

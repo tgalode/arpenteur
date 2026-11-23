@@ -1646,6 +1646,21 @@ async fn site_redirecting_unknown_urls_to_home() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn probe_final_address_is_stored_without_query_or_fragment() {
+    let (site, store, loc, meta, _root) =
+        run(Variant::UnknownRedirectsToLogin, |_| Arc::new(NoEvents)).await;
+    assert_eq!(meta.status, CrawlStatus::Completed);
+    let (_, data) = store.read_crawl(&loc.domain, &loc.id).unwrap();
+    let probe = data.not_found_probe.unwrap();
+    assert!(probe.redirected);
+    assert_eq!(probe.final_url, format!("{}/connexion", site.base));
+    let r = store.load_result(&loc.domain, &loc.id).unwrap();
+    let detail = detail_of(&r, FindingCode::Soft404Site, "/").unwrap();
+    assert_eq!(detail, format!("redirige vers {}/connexion", site.base));
+    assert!(!detail.contains("state"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn page_with_the_error_page_signature_is_a_soft_404() {
     let (_site, store, loc, meta, _root) =
         run(Variant::GhostErrorPage, |_| Arc::new(NoEvents)).await;

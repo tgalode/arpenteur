@@ -196,6 +196,15 @@ pub async fn probe_canonical_targets(
     (added, requests)
 }
 
+/// Adresse inexistante sur l'origine de la page réellement crawlée (l'hôte peut différer de
+/// la saisie : `www.`, schéma), sinon sur celle de l'adresse de départ.
+fn probe_address(pages: &[PageRecord], start: &Url, token: &str) -> Url {
+    let origin = reference_page(pages, start.as_str())
+        .and_then(|p| Url::parse(&p.url).ok())
+        .unwrap_or_else(|| start.clone());
+    not_found_url(&origin, token)
+}
+
 /// Compression d'abord (un constat de site), puis adresse inexistante, cibles de canonical et
 /// liens externes (`check_external_links` : le réglage), dans le budget restant
 /// `max_requests - pages crawlées`. `follow_client` suit les redirections : sans lui (`None`),
@@ -222,7 +231,7 @@ pub async fn run_post_crawl_probes(
         }
     }
     let mut not_found = None;
-    let url = not_found_url(env.start, &random_token());
+    let url = probe_address(pages, env.start, &random_token());
     if let Some(follow) = follow_client
         && budget > 0
         && !env.cancel.is_cancelled()
@@ -261,5 +270,62 @@ pub async fn run_post_crawl_probes(
         pages: probed,
         external,
         external_unchecked,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn html_page(url: &str) -> PageRecord {
+        PageRecord {
+            url: url.into(),
+            status: 200,
+            content_type: "html".into(),
+            size: None,
+            elapsed_ms: 0,
+            headers: BTreeMap::new(),
+            facts: None,
+            probed: false,
+        }
+    }
+
+    fn address(pages: &[PageRecord], start: &str) -> String {
+        probe_address(pages, &Url::parse(start).unwrap(), "abc").to_string()
+    }
+
+    #[test]
+    fn probe_targets_the_host_of_the_reference_page() {
+        let pages = vec![html_page("https://www.x.fr/")];
+        assert_eq!(
+            address(&pages, "https://x.fr/"),
+            "https://www.x.fr/arpenteur-introuvable-abc"
+        );
+    }
+
+    #[test]
+    fn probe_falls_back_on_the_start_origin_without_reference_page() {
+        assert_eq!(
+            address(&[], "https://x.fr/liste"),
+            "https://x.fr/arpenteur-introuvable-abc"
+        );
+    }
+
+    #[test]
+    fn probe_keeps_the_port_of_the_reference_page() {
+        let pages = vec![html_page("https://x.fr:8443/")];
+        assert_eq!(
+            address(&pages, "https://x.fr/"),
+            "https://x.fr:8443/arpenteur-introuvable-abc"
+        );
+    }
+
+    #[test]
+    fn probe_ignores_a_reference_page_of_another_site() {
+        let pages = vec![html_page("https://autre.fr/")];
+        assert_eq!(
+            address(&pages, "https://x.fr/"),
+            "https://x.fr/arpenteur-introuvable-abc"
+        );
     }
 }
