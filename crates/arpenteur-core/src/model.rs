@@ -381,6 +381,30 @@ pub struct SiteSummary {
     pub crawls: Vec<CrawlMeta>,
 }
 
+/// Adresse écartée par robots.txt, avec la page où elle a été trouvée (inconnue en mode liste).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockedUrl {
+    pub url: String,
+    pub found_on: Option<String>,
+}
+
+/// Ce que la vue robots.txt montre.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RobotsReport {
+    /// Le fichier tel qu'il a été lu.
+    pub content: Option<String>,
+    pub status: Option<u16>,
+    /// Directives « Sitemap: » du fichier.
+    pub sitemaps: Vec<String>,
+    pub blocked: Vec<BlockedUrl>,
+    /// Faux sans rapport SiteOne (crawl arrêté ou limité) : la liste est alors incomplète.
+    pub blocked_known: bool,
+    /// Réglage « respecter robots.txt » du crawl.
+    pub respected: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CrawlResult {
@@ -396,6 +420,8 @@ pub struct CrawlResult {
     pub external_unchecked: u32,
     #[serde(default)]
     pub list_skipped: Vec<SkippedUrl>,
+    #[serde(default)]
+    pub robots: RobotsReport,
 }
 
 #[cfg(test)]

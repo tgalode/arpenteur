@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ProblemsPanel } from "../components/ProblemsPanel";
+import { RobotsView } from "../components/RobotsView";
 import { UrlDetail } from "../components/UrlDetail";
 import { UrlTable } from "../components/UrlTable";
 import { formatElapsed, t } from "../i18n/fr";
@@ -62,6 +63,8 @@ export function Crawl({
   const [statusClass, setStatusClass] = useState<StatusClass>("all");
   const [error, setError] = useState<string | null>(null);
   const [restarting, setRestarting] = useState(false);
+  const [robotsOpen, setRobotsOpen] = useState(false);
+  const robotsButton = useRef<HTMLButtonElement>(null);
   const finished = useRef(false);
 
   useEffect(() => {
@@ -186,6 +189,11 @@ export function Crawl({
     }
   }
 
+  function closeRobots() {
+    setRobotsOpen(false);
+    robotsButton.current?.focus();
+  }
+
   async function exportFile(suffix: "urls" | "problemes", contents: string) {
     setError(null);
     try {
@@ -218,6 +226,15 @@ export function Crawl({
                   onClick={() => void exportFile("problemes", problemsCsv(result.findings))}
                 >
                   {t("export_problems")}
+                </button>
+                <button
+                  ref={robotsButton}
+                  type="button"
+                  className="btn"
+                  aria-expanded={robotsOpen}
+                  onClick={() => setRobotsOpen((o) => !o)}
+                >
+                  {t("robotsButton")}
                 </button>
               </>
             )}
@@ -285,7 +302,8 @@ export function Crawl({
               {t("provisional")}
             </p>
           )}
-          <div className="crawl-body">
+          {result && robotsOpen && <RobotsView robots={result.robots} onClose={closeRobots} />}
+          <div className="crawl-body" hidden={robotsOpen}>
             <ProblemsPanel
               findings={findings}
               rows={rows}

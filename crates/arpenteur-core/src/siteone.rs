@@ -2,13 +2,16 @@
 
 use serde_json::Value;
 
-use crate::model::{Finding, FindingCode};
+use url::Url;
+
+use crate::model::{BlockedUrl, Finding, FindingCode};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SiteOneSummary {
     pub certificate_errors: Vec<String>,
     pub certificate_expired: bool,
     pub certificate_issuer: Option<String>,
+    pub robots_blocked: Vec<BlockedUrl>,
 }
 
 fn rows<'a>(root: &'a Value, table: &str) -> &'a [Value] {
@@ -33,7 +36,37 @@ fn is_connection_failure(message: &str) -> bool {
     CONNECTION_FAILURES.iter().any(|p| message.starts_with(p))
 }
 
-pub fn read_siteone(json: &str) -> Option<SiteOneSummary> {
+/// Raison notée par SiteOne pour une adresse écartée par robots.txt.
+const ROBOTS_REASON: &str = "Robots.txt";
+
+/// SiteOne écrit sans schéma ni hôte les adresses de l'hôte de départ (`/prive?x=1`) :
+/// on les rend absolues avec l'origine du crawl. Tout ce qui n'est ni de ce genre ni
+/// une adresse http(s) complète est ignoré.
+fn absolute(value: &str, origin: &Url) -> Option<String> {
+    if value.starts_with('/') && !value.starts_with("//") {
+        return origin.join(value).ok().map(String::from);
+    }
+    let url = Url::parse(value).ok()?;
+    matches!(url.scheme(), "http" | "https").then(|| value.to_string())
+}
+
+fn robots_blocked(root: &Value, start_url: &str) -> Vec<BlockedUrl> {
+    let Ok(origin) = Url::parse(start_url) else {
+        return Vec::new();
+    };
+    rows(root, "skipped")
+        .iter()
+        .filter(|row| text(row, "reason") == ROBOTS_REASON)
+        .filter_map(|row| {
+            Some(BlockedUrl {
+                url: absolute(text(row, "url"), &origin)?,
+                found_on: absolute(text(row, "sourceUqId"), &origin),
+            })
+        })
+        .collect()
+}
+
+pub fn read_siteone(json: &str, start_url: &str) -> Option<SiteOneSummary> {
     let root: Value = serde_json::from_str(json).ok()?;
     if !root.is_object() {
         return None;
@@ -66,6 +99,8 @@ pub fn read_siteone(json: &str) -> Option<SiteOneSummary> {
             summary.certificate_errors.push(note);
         }
     }
+
+    summary.robots_blocked = robots_blocked(&root, start_url);
 
     Some(summary)
 }
@@ -108,13 +143,13 @@ mod tests {
     const ERRORS_ROW: &str = r#"{"info":"Errors","value":"TLS handshake failed"}"#;
 
     fn findings(json: &str) -> Vec<Finding> {
-        site_findings(&read_siteone(json).unwrap(), START)
+        site_findings(&read_siteone(json, START).unwrap(), START)
     }
 
     #[test]
     fn valid_certificate_gives_no_finding() {
         let json = report(&[ISSUER, VALID_TO_OK].join(","));
-        let summary = read_siteone(&json).unwrap();
+        let summary = read_siteone(&json, START).unwrap();
         assert!(summary.certificate_errors.is_empty());
         assert!(!summary.certificate_expired);
         assert_eq!(
@@ -160,7 +195,7 @@ mod tests {
         ] {
             let row = format!(r#"{{"info":"Errors","value":"{message}"}}"#);
             let json = report(&row);
-            let summary = read_siteone(&json).unwrap();
+            let summary = read_siteone(&json, START).unwrap();
             assert!(summary.certificate_errors.is_empty(), "{message}");
             assert!(findings(&json).is_empty(), "{message}");
         }
@@ -227,16 +262,79 @@ mod tests {
 
     #[test]
     fn missing_or_garbled_json_is_none() {
-        assert!(read_siteone("").is_none());
-        assert!(read_siteone("pas du json").is_none());
-        assert!(read_siteone("[1,2]").is_none());
+        assert!(read_siteone("", START).is_none());
+        assert!(read_siteone("pas du json", START).is_none());
+        assert!(read_siteone("[1,2]", START).is_none());
     }
 
     #[test]
     fn absent_tables_are_tolerated() {
-        let summary = read_siteone(r#"{"tables":{}}"#).unwrap();
+        let summary = read_siteone(r#"{"tables":{}}"#, START).unwrap();
         assert_eq!(summary, SiteOneSummary::default());
         assert!(site_findings(&summary, START).is_empty());
-        assert!(read_siteone("{}").is_some());
+        assert!(read_siteone("{}", START).is_some());
+    }
+
+    fn skipped_report(rows: &str) -> String {
+        format!(r#"{{"tables":{{"skipped":{{"rows":[{rows}]}}}}}}"#)
+    }
+
+    const EXEMPLE: &str = "https://exemple.fr/";
+
+    fn blocked(json: &str) -> Vec<BlockedUrl> {
+        read_siteone(json, EXEMPLE).unwrap().robots_blocked
+    }
+
+    #[test]
+    fn reads_robots_blocked_urls_from_the_skipped_table() {
+        let json = skipped_report(
+            r#"{"reason":"Robots.txt","url":"/prive?x=1","sourceAttr":"a","sourceUqId":"/"}"#,
+        );
+        assert_eq!(
+            blocked(&json),
+            vec![BlockedUrl {
+                url: "https://exemple.fr/prive?x=1".into(),
+                found_on: Some("https://exemple.fr/".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn ignores_other_reasons_and_tolerates_odd_rows() {
+        let json = skipped_report(
+            r#"{"reason":"Not allowed host","url":"https://autre.fr/","sourceUqId":"/"},
+               {"reason":"Max depth","url":"/profond","sourceUqId":"/"},
+               {"reason":"Robots.txt","url":"https://autre.fr/x","sourceUqId":"/a"},
+               {"reason":"Robots.txt","sourceUqId":"/a"},
+               {"reason":"Robots.txt","url":"","sourceUqId":"/a"},
+               {"reason":"Robots.txt","url":"//autre.fr/y","sourceUqId":"/a"},
+               {"reason":"Robots.txt","url":"prive","sourceUqId":"/a"},
+               {"reason":"Robots.txt","url":"/sans-source"},
+               {"reason":"Robots.txt","url":12,"sourceUqId":"/a"}"#,
+        );
+        assert_eq!(
+            blocked(&json),
+            vec![
+                BlockedUrl {
+                    url: "https://autre.fr/x".into(),
+                    found_on: Some("https://exemple.fr/a".into()),
+                },
+                BlockedUrl {
+                    url: "https://exemple.fr/sans-source".into(),
+                    found_on: None,
+                },
+            ]
+        );
+        assert!(blocked(r#"{"tables":{}}"#).is_empty());
+        assert!(blocked(&skipped_report("")).is_empty());
+        assert!(
+            read_siteone(
+                &skipped_report(r#"{"reason":"Robots.txt","url":"/x"}"#),
+                "pas une adresse"
+            )
+            .unwrap()
+            .robots_blocked
+            .is_empty()
+        );
     }
 }

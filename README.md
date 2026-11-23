@@ -8,7 +8,8 @@ Il est construit avec Tauri et React. Le moteur de crawl est [SiteOne Crawler](h
 
 - Il crawle un site à partir de son adresse et liste toutes les URL trouvées.
 - Il crawle aussi une liste d'URL (une adresse par ligne, un seul site à la fois) sans suivre les liens : utile pour revérifier quelques pages.
-- Il repère les problèmes du catalogue (38 contrôles) et les regroupe par niveau : haute, moyenne, basse, information.
+- Il repère les problèmes du catalogue (45 contrôles) et les regroupe par niveau : haute, moyenne, basse, information.
+- Il montre le robots.txt du site tel qu'il a été lu, les sitemaps qu'il déclare et les adresses qu'il a bloquées pendant un crawl terminé.
 - Il exporte les résultats en CSV, lisible directement dans Excel en français.
 - Il a des réglages : nombre de connexions, débit, limite de requêtes, motifs à inclure ou à ignorer, respect du robots.txt.
 - Il vérifie les liens externes cassés : cette vérification envoie une requête par lien externe aux sites tiers, et se désactive dans les réglages.

@@ -313,7 +313,7 @@ pub async fn discover_with_limit(
     result
 }
 
-fn sitemap_directive(line: &str) -> Option<&str> {
+pub(crate) fn sitemap_directive(line: &str) -> Option<&str> {
     let (name, value) = line.split_once(':')?;
     if name.trim().eq_ignore_ascii_case("sitemap") {
         let value = value.trim();

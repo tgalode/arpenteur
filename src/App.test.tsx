@@ -51,6 +51,7 @@ function result(id: string, status: CrawlStatus): CrawlResult {
     externalLinks: [],
     externalUnchecked: 0,
     listSkipped: [],
+    robots: { content: null, status: null, sitemaps: [], blocked: [], blockedKnown: false, respected: true },
   };
 }
 

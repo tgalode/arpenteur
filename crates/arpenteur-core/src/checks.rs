@@ -5,11 +5,13 @@ use url::Url;
 
 use crate::links::{analyze_links, redirect_target};
 use crate::model::{
-    CollectedData, CrawlMeta, CrawlMode, CrawlResult, CrawlStatus, ExternalCheck, ExternalOutcome,
-    FACTS_VERSION, Finding, FindingCode, Indexability, LinkReport, NotFoundProbe, PageFacts,
-    PageRecord, SitemapResult, UrlRow,
+    BlockedUrl, CollectedData, CrawlMeta, CrawlMode, CrawlResult, CrawlStatus, ExternalCheck,
+    ExternalOutcome, FACTS_VERSION, Finding, FindingCode, Indexability, LinkReport, NotFoundProbe,
+    PageFacts, PageRecord, RobotsReport, SitemapResult, UrlRow,
 };
+use crate::settings::SkipReason;
 use crate::siteone::{SiteOneSummary, site_findings};
+use crate::sitemap::sitemap_directive;
 use crate::urls::{is_same_site, normalize_url};
 
 pub const IMAGE_HEAVY_BYTES: i64 = 204_800;
@@ -738,6 +740,48 @@ pub fn build_rows(
         .collect()
 }
 
+fn robots_report(
+    meta: &CrawlMeta,
+    data: &CollectedData,
+    siteone: Option<&SiteOneSummary>,
+) -> RobotsReport {
+    let content = data.sitemap.robots_txt.clone();
+    let sitemaps = content
+        .as_deref()
+        .map(|body| {
+            body.lines()
+                .filter_map(sitemap_directive)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    // Mode liste : les adresses écartées sont connues même sans rapport SiteOne.
+    let mut blocked: Vec<BlockedUrl> = data
+        .list_skipped
+        .iter()
+        .filter(|s| s.reason == SkipReason::Robots)
+        .map(|s| BlockedUrl {
+            url: s.url.clone(),
+            found_on: None,
+        })
+        .collect();
+    if let Some(summary) = siteone {
+        for found in &summary.robots_blocked {
+            if !blocked.iter().any(|b| b.url == found.url) {
+                blocked.push(found.clone());
+            }
+        }
+    }
+    RobotsReport {
+        content,
+        status: data.sitemap.robots_status,
+        sitemaps,
+        blocked,
+        blocked_known: siteone.is_some(),
+        respected: meta.settings.respect_robots,
+    }
+}
+
 pub fn assemble(
     meta: CrawlMeta,
     data: CollectedData,
@@ -758,6 +802,7 @@ pub fn assemble(
         findings.extend(site_findings(summary, &site_url));
     }
     let rows = build_rows(&data.pages, &links, meta.mode, &meta.list_urls);
+    let robots = robots_report(&meta, &data, siteone.as_ref());
     CrawlResult {
         meta,
         rows,
@@ -768,6 +813,7 @@ pub fn assemble(
         external_links: data.external_links,
         external_unchecked: data.external_unchecked,
         list_skipped: data.list_skipped,
+        robots,
     }
 }
 
@@ -1955,6 +2001,105 @@ mod tests {
         assert!(!run(0));
         assert!(!run(1));
         assert!(run(2));
+    }
+
+    fn robots_meta(mode: CrawlMode) -> CrawlMeta {
+        CrawlMeta {
+            id: "i".into(),
+            domain: "exemple.fr".into(),
+            start_url: "https://exemple.fr/".into(),
+            started_at: String::new(),
+            finished_at: None,
+            status: CrawlStatus::Completed,
+            settings: Default::default(),
+            pages: 0,
+            mode,
+            list_urls: Vec::new(),
+        }
+    }
+
+    fn blocked_url(url: &str) -> BlockedUrl {
+        BlockedUrl {
+            url: url.into(),
+            found_on: Some("https://exemple.fr/".into()),
+        }
+    }
+
+    #[test]
+    fn robots_report_lists_declared_sitemaps() {
+        let mut data = CollectedData::default();
+        data.sitemap.robots_txt = Some(
+            "User-agent: *\nDisallow: /prive\n  SITEMAP :  https://exemple.fr/sitemap.xml \nSitemap:\n"
+                .into(),
+        );
+        data.sitemap.robots_status = Some(200);
+        let r = assemble(robots_meta(CrawlMode::Site), data, None).robots;
+        assert_eq!(r.sitemaps, vec!["https://exemple.fr/sitemap.xml".to_string()]);
+        assert_eq!(r.status, Some(200));
+        assert!(r.content.unwrap().contains("Disallow: /prive"));
+        assert!(r.respected);
+
+        let r = assemble(robots_meta(CrawlMode::Site), CollectedData::default(), None).robots;
+        assert!(r.sitemaps.is_empty());
+        assert_eq!(r.content, None);
+    }
+
+    #[test]
+    fn robots_report_without_siteone_json_says_blocked_unknown() {
+        let r = assemble(robots_meta(CrawlMode::Site), CollectedData::default(), None).robots;
+        assert!(!r.blocked_known);
+        assert!(r.blocked.is_empty());
+
+        let empty = Some(SiteOneSummary::default());
+        let r = assemble(robots_meta(CrawlMode::Site), CollectedData::default(), empty).robots;
+        assert!(r.blocked_known);
+        assert!(r.blocked.is_empty());
+
+        let summary = SiteOneSummary {
+            robots_blocked: vec![blocked_url("https://exemple.fr/prive")],
+            ..Default::default()
+        };
+        let r = assemble(
+            robots_meta(CrawlMode::Site),
+            CollectedData::default(),
+            Some(summary),
+        )
+        .robots;
+        assert_eq!(r.blocked, vec![blocked_url("https://exemple.fr/prive")]);
+    }
+
+    #[test]
+    fn robots_report_follows_the_respect_robots_setting() {
+        let mut meta = robots_meta(CrawlMode::Site);
+        meta.settings.respect_robots = false;
+        let r = assemble(meta, CollectedData::default(), None).robots;
+        assert!(!r.respected);
+    }
+
+    #[test]
+    fn list_mode_adds_addresses_skipped_by_robots() {
+        use crate::model::SkippedUrl;
+        let data = CollectedData {
+            list_skipped: vec![
+                SkippedUrl {
+                    url: "https://exemple.fr/prive".into(),
+                    reason: SkipReason::Robots,
+                },
+                SkippedUrl {
+                    url: "https://exemple.fr/ignore".into(),
+                    reason: SkipReason::Pattern,
+                },
+            ],
+            ..Default::default()
+        };
+        let r = assemble(robots_meta(CrawlMode::List), data, None).robots;
+        assert_eq!(
+            r.blocked,
+            vec![BlockedUrl {
+                url: "https://exemple.fr/prive".into(),
+                found_on: None,
+            }]
+        );
     }
 
     #[test]

@@ -180,6 +180,20 @@ export interface SkippedUrl {
   reason: SkipReason;
 }
 
+export interface BlockedUrl {
+  url: string;
+  foundOn: string | null;
+}
+
+export interface RobotsReport {
+  content: string | null;
+  status: number | null;
+  sitemaps: string[];
+  blocked: BlockedUrl[];
+  blockedKnown: boolean;
+  respected: boolean;
+}
+
 export interface CrawlMeta {
   id: string;
   domain: string;
@@ -217,6 +231,7 @@ export interface CrawlResult {
   externalLinks: ExternalCheck[];
   externalUnchecked: number;
   listSkipped: SkippedUrl[];
+  robots: RobotsReport;
 }
 
 /** Instantané d'un crawl en cours : mêmes lignes et constats qu'à la fin, provisoires. */

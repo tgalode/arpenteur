@@ -603,6 +603,71 @@ select {
   min-height: 0;
 }
 
+.crawl-body[hidden] {
+  display: none;
+}
+
+.robots {
+  flex: 1;
+  min-height: 0;
+  margin: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  overflow: auto;
+}
+
+.robots-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.robots h2 {
+  font-size: inherit;
+  font-weight: 400;
+}
+
+.robots h3 {
+  margin: 12px 0 3px;
+  font-size: inherit;
+  font-weight: 400;
+}
+
+.robots-file {
+  max-height: 40vh;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  color: var(--strong);
+  font-family: inherit;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+.robots ul {
+  padding: 0;
+  list-style: none;
+}
+
+.robots li {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0;
+  overflow-wrap: anywhere;
+}
+
+.robots li > span:first-child {
+  color: var(--strong);
+}
+
+.robots > p {
+  margin-top: 4px;
+}
+
 .crawl-main {
   display: flex;
   flex-direction: column;

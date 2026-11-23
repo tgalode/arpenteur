@@ -48,6 +48,7 @@ function result(findings: Finding[], urls: string[]): CrawlResult {
     externalLinks: [],
     externalUnchecked: 0,
     listSkipped: [],
+    robots: { content: null, status: null, sitemaps: [], blocked: [], blockedKnown: false, respected: true },
   };
 }
 

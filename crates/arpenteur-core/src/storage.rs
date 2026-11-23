@@ -173,7 +173,7 @@ impl CrawlStore {
         let (meta, data) = self.read_crawl(domain, id)?;
         let siteone = fs::read_to_string(self.sites_dir().join(domain).join(id).join(SITEONE_FILE))
             .ok()
-            .and_then(|json| read_siteone(&json));
+            .and_then(|json| read_siteone(&json, &meta.start_url));
         Ok(assemble(meta, data, siteone))
     }
 }

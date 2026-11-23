@@ -116,6 +116,7 @@ function result(status: CrawlStatus): CrawlResult {
     externalLinks: [],
     externalUnchecked: 0,
     listSkipped: [],
+    robots: { content: null, status: null, sitemaps: [], blocked: [], blockedKnown: false, respected: true },
   };
 }
 
@@ -448,6 +449,48 @@ test("les boutons d’export n’apparaissent qu’avec un résultat chargé", a
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
   expect(await screen.findByRole("button", { name: "exporter les URL" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "exporter les problèmes" })).toBeTruthy();
+});
+
+test("le bouton « robots.txt » n’apparaît que pour un crawl chargé et terminé", async () => {
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
+  const { unmount } = render(<Crawl domain="exemple.fr" id="abc" running={true} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByRole("button", { name: "arrêter" });
+  expect(screen.queryByRole("button", { name: "robots.txt" })).toBeNull();
+  unmount();
+
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "running" }));
+  const { unmount: unmountLoaded } = render(
+    <Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />,
+  );
+  await screen.findByText("https://exemple.fr/tarifs");
+  expect(screen.queryByRole("button", { name: "robots.txt" })).toBeNull();
+  unmountLoaded();
+
+  vi.mocked(api.loadCrawl).mockResolvedValue(result({ kind: "completed" }));
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  expect(await screen.findByRole("button", { name: "robots.txt" })).toBeTruthy();
+});
+
+test("« robots.txt » ouvre la vue, Échap la ferme et le focus revient au bouton", async () => {
+  const user = userEvent.setup();
+  const r = result({ kind: "completed" });
+  r.robots = {
+    content: "User-agent: *\nDisallow: /prive\n",
+    status: 200,
+    sitemaps: [],
+    blocked: [{ url: "https://exemple.fr/prive", foundOn: "https://exemple.fr/" }],
+    blockedKnown: true,
+    respected: true,
+  };
+  vi.mocked(api.loadCrawl).mockResolvedValue(r);
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  const button = await screen.findByRole("button", { name: "robots.txt" });
+  await user.click(button);
+  expect(screen.getByRole("region", { name: "robots.txt" })).toBeTruthy();
+  expect(screen.getByText("https://exemple.fr/prive")).toBeTruthy();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("region", { name: "robots.txt" })).toBeNull();
+  expect(document.activeElement).toBe(button);
 });
 
 test("exporter les URL propose <domaine>-<id>-urls.csv avec toutes les lignes", async () => {
