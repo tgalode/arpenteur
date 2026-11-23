@@ -686,6 +686,10 @@ fn canonical_finding(
     if partial && !by_url.contains_key(&target) {
         return None;
     }
+    // Une cible en 429 ou 503 peut finir en erreur ou non selon la limite : pas de constat avant la fin.
+    if partial && by_url.get(&target).is_some_and(|t| matches!(t.status, 429 | 503)) {
+        return None;
+    }
     let code = match by_url.get(&target) {
         Some(t) if is_error(t, throttled) => FindingCode::CanonicalToError,
         Some(t) if (300..400).contains(&t.status) => FindingCode::CanonicalToRedirect,
