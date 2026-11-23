@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::checks::{CheckInput, build_rows, run_checks};
 use crate::collector::CollectorHandle;
 use crate::links::analyze_links;
-use crate::model::{
-    CrawlMeta, CrawlMode, Finding, FindingCode, PageRecord, SitemapResult, UrlRow,
-};
+use crate::model::{CrawlMeta, CrawlMode, Finding, FindingCode, PageRecord, SitemapResult, UrlRow};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -92,7 +90,10 @@ fn view_of(pages: Vec<PageRecord>, sitemap: &SitemapResult, mut meta: CrawlMeta)
     });
     let rows = build_rows(&pages, &links, meta.mode, &meta.list_urls);
     // Chaque membre d'un groupe a son constat : la liste des autres ferait N x (N-1) adresses.
-    for f in findings.iter_mut().filter(|f| GROUP_CODES.contains(&f.code)) {
+    for f in findings
+        .iter_mut()
+        .filter(|f| GROUP_CODES.contains(&f.code))
+    {
         f.related.clear();
     }
     meta.pages = pages.len() as u32;
@@ -214,14 +215,15 @@ mod tests {
             );
         }
         // Pas de constat de canonical du tout : il ne doit pas être renommé à la fin.
-        for code in [FindingCode::CanonicalToOtherUrl, FindingCode::CanonicalToRedirect] {
+        for code in [
+            FindingCode::CanonicalToOtherUrl,
+            FindingCode::CanonicalToRedirect,
+        ] {
             assert!(urls_of(&view, code.clone()).is_empty(), "{code:?}");
         }
         assert!(
-            !view
-                .findings
-                .iter()
-                .any(|f| f.url == format!("{BASE}/c") && format!("{:?}", f.code).starts_with("Canonical")),
+            !view.findings.iter().any(|f| f.url == format!("{BASE}/c")
+                && format!("{:?}", f.code).starts_with("Canonical")),
             "{:?}",
             view.findings
         );

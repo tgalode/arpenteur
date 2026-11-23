@@ -88,7 +88,9 @@ fn begin_crawl(
         CrawlTarget::Site(url) => (CrawlMode::Site, url.as_str().to_string(), Vec::new()),
         CrawlTarget::List(urls) => (
             CrawlMode::List,
-            urls.first().map(|u| u.as_str().to_string()).unwrap_or_default(),
+            urls.first()
+                .map(|u| u.as_str().to_string())
+                .unwrap_or_default(),
             urls.iter().map(|u| u.as_str().to_string()).collect(),
         ),
     };
@@ -216,7 +218,10 @@ mod tests {
             .map(|u| Url::parse(u).unwrap())
             .to_vec();
         let site = CrawlTarget::Site(Url::parse("https://www.exemple.fr/").unwrap());
-        assert_eq!(target_site_key(&CrawlTarget::List(urls)), target_site_key(&site));
+        assert_eq!(
+            target_site_key(&CrawlTarget::List(urls)),
+            target_site_key(&site)
+        );
         assert_eq!(target_site_key(&site), domain_key("www.exemple.fr"));
     }
 

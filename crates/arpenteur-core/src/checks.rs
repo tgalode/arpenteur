@@ -10,8 +10,8 @@ use crate::model::{
     PageFacts, PageRecord, RobotsReport, SitemapResult, UrlRow,
 };
 use crate::settings::SkipReason;
-use crate::siteone::{SiteOneSummary, site_findings};
 use crate::sitemap::sitemap_directive;
+use crate::siteone::{SiteOneSummary, site_findings};
 use crate::urls::{is_same_site, normalize_url};
 
 pub const IMAGE_HEAVY_BYTES: i64 = 204_800;
@@ -694,7 +694,11 @@ fn canonical_finding(
         return None;
     }
     // Une cible en 429 ou 503 peut finir en erreur ou non selon la limite : pas de constat avant la fin.
-    if partial && by_url.get(&target).is_some_and(|t| matches!(t.status, 429 | 503)) {
+    if partial
+        && by_url
+            .get(&target)
+            .is_some_and(|t| matches!(t.status, 429 | 503))
+    {
         return None;
     }
     let code = match by_url.get(&target) {
@@ -2045,7 +2049,10 @@ mod tests {
         );
         data.sitemap.robots_status = Some(200);
         let r = assemble(robots_meta(CrawlMode::Site), data, None).robots;
-        assert_eq!(r.sitemaps, vec!["https://exemple.fr/sitemap.xml".to_string()]);
+        assert_eq!(
+            r.sitemaps,
+            vec!["https://exemple.fr/sitemap.xml".to_string()]
+        );
         assert_eq!(r.status, Some(200));
         assert!(r.content.unwrap().contains("Disallow: /prive"));
         assert!(r.respected);
@@ -2062,7 +2069,12 @@ mod tests {
         assert!(r.blocked.is_empty());
 
         let empty = Some(SiteOneSummary::default());
-        let r = assemble(robots_meta(CrawlMode::Site), CollectedData::default(), empty).robots;
+        let r = assemble(
+            robots_meta(CrawlMode::Site),
+            CollectedData::default(),
+            empty,
+        )
+        .robots;
         assert!(r.blocked_known);
         assert!(r.blocked.is_empty());
 
