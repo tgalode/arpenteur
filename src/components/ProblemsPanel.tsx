@@ -114,6 +114,12 @@ export function ProblemsPanel({
             </button>
           </li>
         ))}
+        {summary.ignored > 0 && (
+          <li className="overview-line">
+            <span>{t("overview_ignored")}</span>
+            <span className="n">{summary.ignored}</span>
+          </li>
+        )}
         <li className="overview-line">
           <span>{t("overview_indexable")}</span>
           <span className="n">{summary.indexable}</span>

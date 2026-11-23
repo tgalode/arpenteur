@@ -46,6 +46,35 @@ test("un fichier absent affiche « introuvable »", () => {
   expect(v.getByText("aucun sitemap déclaré")).toBeTruthy();
 });
 
+test.each([
+  [410, "introuvable"],
+  [500, "illisible (réponse 500)"],
+  [403, "illisible (réponse 403)"],
+])("sans contenu et en réponse %i, la vue affiche « %s »", (status, label) => {
+  const v = view({ content: null, status, sitemaps: [] });
+  expect(v.getByText(label)).toBeTruthy();
+  if (status === 410) expect(v.queryByText(/illisible/)).toBeNull();
+  else expect(v.queryByText("introuvable")).toBeNull();
+});
+
+test("sans contenu et sans statut, la vue affiche « non lu »", () => {
+  const v = view({ content: null, status: null, sitemaps: [] });
+  expect(v.getByText("non lu")).toBeTruthy();
+  expect(v.queryByText("introuvable")).toBeNull();
+  expect(v.queryByText(/illisible/)).toBeNull();
+});
+
+test("un fichier au contenu vide affiche « fichier vide »", () => {
+  const v = view({ content: "", sitemaps: [] });
+  expect(v.getByText("fichier vide")).toBeTruthy();
+});
+
+test("un crawl enregistré sans statut garde l'affichage de son contenu", () => {
+  const v = view({ status: null });
+  expect(v.getByText(/Disallow: \/prive/).tagName).toBe("PRE");
+  expect(v.queryByText("non lu")).toBeNull();
+});
+
 test("sans rapport SiteOne sur un crawl non terminé, la vue dit que la liste est disponible pour un crawl terminé", () => {
   const v = view({ blockedKnown: false, blocked: [] }, () => {}, false);
   expect(v.getByText("liste disponible pour un crawl terminé")).toBeTruthy();

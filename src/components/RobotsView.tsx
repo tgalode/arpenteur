@@ -2,6 +2,12 @@ import { useEffect, useRef } from "react";
 import { t } from "../i18n/fr";
 import type { RobotsReport } from "../lib/types";
 
+/** « introuvable » seulement sur 404 ou 410 : toute autre réponse, ou aucune, n'en dit pas autant. */
+function missingText(status: number | null): string {
+  if (status === null) return t("robotsNotRead");
+  return status === 404 || status === 410 ? t("robotsMissing") : t("robotsUnreadable", { status });
+}
+
 export function RobotsView({
   robots,
   finished,
@@ -42,7 +48,13 @@ export function RobotsView({
         {t("robotsFileHeading")}
         {robots.status !== null && <span className="dim"> · {t("robotsStatus", { status: robots.status })}</span>}
       </h3>
-      {robots.content === null ? <p className="dim">{t("robotsMissing")}</p> : <pre className="robots-file">{robots.content}</pre>}
+      {robots.content === null ? (
+        <p className="dim">{missingText(robots.status)}</p>
+      ) : robots.content === "" ? (
+        <p className="dim">{t("robotsEmpty")}</p>
+      ) : (
+        <pre className="robots-file">{robots.content}</pre>
+      )}
 
       <h3>{t("robotsSitemapsHeading")}</h3>
       {robots.sitemaps.length === 0 ? (

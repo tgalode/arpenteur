@@ -14,11 +14,14 @@ const STORAGE_KEY = "arpenteur.grouping";
 export function crawlSummary(rows: UrlRow[]): {
   urls: number;
   byStatus: Record<ResponseClass, number>;
+  /** Lignes d'aucune des cinq classes (statut « ignorée »). */
+  ignored: number;
   indexable: number;
 } {
   const byStatus = {} as Record<ResponseClass, number>;
   for (const c of RESPONSE_CLASSES) byStatus[c] = filterRows(rows, { query: "", statusClass: c }).length;
-  return { urls: rows.length, byStatus, indexable: rows.filter((r) => r.indexable === "yes").length };
+  const classed = RESPONSE_CLASSES.reduce((sum, c) => sum + byStatus[c], 0);
+  return { urls: rows.length, byStatus, ignored: rows.length - classed, indexable: rows.filter((r) => r.indexable === "yes").length };
 }
 
 export function loadGrouping(): Grouping {

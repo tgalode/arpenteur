@@ -134,6 +134,18 @@ test("le résumé donne le nombre d’URL, leur répartition et les pages indexa
   expect(within(panel).getByText("indexables").parentElement?.textContent).toContain("3");
 });
 
+test("les lignes ignorées sont comptées à part, en texte simple, seulement s'il y en a", () => {
+  render(<ProblemsPanel rows={[row(0, 200), row(1, 404), row(2, -6), row(3, -6)]} statusClass="all" onStatusClass={() => {}} findings={[]} selectedCode={null} onSelect={() => {}} />);
+  const panel = screen.getByRole("complementary", { name: "problèmes" });
+  const line = within(panel).getByText("ignorées");
+  expect(line.parentElement?.textContent).toBe("ignorées2");
+  expect(line.closest("button")).toBeNull();
+  expect(within(panel).getByText("URL").parentElement?.textContent).toContain("4");
+  cleanup();
+  render(<Harness />);
+  expect(within(screen.getByRole("complementary", { name: "problèmes" })).queryByText("ignorées")).toBeNull();
+});
+
 test("un clic sur « 4xx » règle le filtre de statut, un second clic le retire", async () => {
   render(<Harness />);
   const btn = () => screen.getByRole("button", { name: "4xx, 2" });

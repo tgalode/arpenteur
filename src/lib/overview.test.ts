@@ -49,6 +49,7 @@ test("le résumé compte les URL par réponse et les pages indexables", () => {
   expect(crawlSummary(all)).toEqual({
     urls: 95,
     byStatus: { "2xx": 88, "3xx": 4, "4xx": 3, "5xx": 0, error: 0 },
+    ignored: 0,
     indexable: 71,
   });
 });
@@ -70,12 +71,21 @@ test("chaque nombre du résumé égale le nombre de lignes du tableau une fois l
   }
   expect(summary.byStatus.error).toBe(2);
   expect(summary.urls).toBe(all.length);
+  expect(summary.ignored).toBe(3);
+});
+
+test("les classes et les lignes ignorées additionnent toutes les URL", () => {
+  const summary = crawlSummary(rows([[200, 1, 1], [404, 1, 0], [-6, 2, 0]]));
+  const classes = Object.values(summary.byStatus).reduce((a, b) => a + b, 0);
+  expect([summary.urls, classes, summary.ignored]).toEqual([4, 2, 2]);
+  expect(crawlSummary(rows([[200, 2, 2]])).ignored).toBe(0);
 });
 
 test("un crawl vide donne un résumé à zéro", () => {
   expect(crawlSummary([])).toEqual({
     urls: 0,
     byStatus: { "2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0, error: 0 },
+    ignored: 0,
     indexable: 0,
   });
 });
