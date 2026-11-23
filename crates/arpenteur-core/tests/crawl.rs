@@ -461,7 +461,7 @@ async fn post_probes(
 ) -> PostCrawl {
     post_probes_with(
         client,
-        &follow_client(),
+        Some(&follow_client()),
         false,
         None,
         start,
@@ -476,7 +476,7 @@ async fn post_probes(
 #[allow(clippy::too_many_arguments)]
 async fn post_probes_with(
     client: &reqwest::Client,
-    follow: &reqwest::Client,
+    follow: Option<&reqwest::Client>,
     check_external: bool,
     robots_txt: Option<&str>,
     start: &Url,
@@ -1669,7 +1669,7 @@ async fn not_found_probe_shares_the_budget_and_respects_robots() {
         async move {
             post_probes_with(
                 &probe_client(),
-                &follow_client(),
+                Some(&follow_client()),
                 true,
                 robots,
                 &start,
@@ -1795,4 +1795,52 @@ async fn list_mode_records_the_robots_status() {
         let r = store.load_result(&loc.domain, &loc.id).unwrap();
         assert_eq!(has(&r, FindingCode::RobotsTxtMissing, "/"), missing);
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn not_found_probe_reads_a_bounded_body() {
+    use arpenteur_core::not_found_probe::{NOT_FOUND_BODY_LIMIT, not_found_url, probe_not_found};
+    let site = start_fixture_site(Variant::HugeNotFoundBody).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let url = not_found_url(&start, "0123456789abcdef");
+    let probe = probe_not_found(&follow_client(), &url, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(probe.status, 200);
+    assert_eq!(probe.title.as_deref(), Some("Gros corps"));
+    assert_eq!(probe.h1.as_deref(), Some("Gros H1"));
+    // Le corps servi (3 Mo) dépasse la limite : la lecture s'arrête avant sa fin, mais le nombre
+    // d'octets réellement lus n'est pas observable depuis le test (le noyau met en tampon).
+    assert!(3_000_000 > NOT_FOUND_BODY_LIMIT);
+    assert!(!probe.text_hash.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_a_follow_client_only_compression_and_canonical_probes_run() {
+    let site = start_fixture_site(Variant::CanonicalOrphanTarget).await;
+    let start = Url::parse(&format!("{}/", site.base)).unwrap();
+    let pages = vec![
+        fixture_page(&format!("{}/", site.base), 200, None),
+        fixture_page(
+            &format!("{}/x", site.base),
+            200,
+            Some(&format!("{}/canon-target", site.base)),
+        ),
+    ];
+    let r = post_probes_with(
+        &probe_client(),
+        None,
+        true,
+        None,
+        &start,
+        &pages,
+        100,
+        Duration::ZERO,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(r.content_encoding.as_deref(), Some(""));
+    assert_eq!(r.pages.len(), 1);
+    assert!(r.not_found.is_none() && r.external.is_empty());
+    assert_eq!(site.count_prefix(support::NOT_FOUND_PREFIX), 0);
 }

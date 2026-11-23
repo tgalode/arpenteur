@@ -337,21 +337,21 @@ pub async fn run_crawl(
                     cancel: &cancel,
                     on_external_progress: &report,
                 };
-                if let Ok(follow) = external_client(&plain_user_agent(&settings)) {
-                    let probed = run_post_crawl_probes(
-                        &env,
-                        &pages,
-                        settings.max_requests as usize,
-                        &follow,
-                        settings.check_external_links,
-                    )
-                    .await;
-                    start_content_encoding = probed.content_encoding;
-                    not_found_probe = probed.not_found;
-                    external_links = probed.external;
-                    external_unchecked = probed.external_unchecked;
-                    pages.extend(probed.pages);
-                }
+                // Sans client qui suit les redirections : ni adresse inexistante ni liens externes.
+                let follow = external_client(&plain_user_agent(&settings)).ok();
+                let probed = run_post_crawl_probes(
+                    &env,
+                    &pages,
+                    settings.max_requests as usize,
+                    follow.as_ref(),
+                    settings.check_external_links,
+                )
+                .await;
+                start_content_encoding = probed.content_encoding;
+                not_found_probe = probed.not_found;
+                external_links = probed.external;
+                external_unchecked = probed.external_unchecked;
+                pages.extend(probed.pages);
             }
         }
         // Les pages sont complètes, les vérifications non : on le dit.

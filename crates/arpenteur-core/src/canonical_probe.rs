@@ -198,12 +198,13 @@ pub async fn probe_canonical_targets(
 
 /// Compression d'abord (un constat de site), puis adresse inexistante, cibles de canonical et
 /// liens externes (`check_external_links` : le réglage), dans le budget restant
-/// `max_requests - pages crawlées`. `follow_client` suit les redirections.
+/// `max_requests - pages crawlées`. `follow_client` suit les redirections : sans lui (`None`),
+/// ni adresse inexistante ni liens externes.
 pub async fn run_post_crawl_probes(
     env: &ProbeEnv<'_>,
     pages: &[PageRecord],
     max_requests: usize,
-    follow_client: &reqwest::Client,
+    follow_client: Option<&reqwest::Client>,
     check_external_links_setting: bool,
 ) -> PostCrawl {
     let mut budget = max_requests.saturating_sub(pages.len());
@@ -222,11 +223,15 @@ pub async fn run_post_crawl_probes(
     }
     let mut not_found = None;
     let url = not_found_url(env.start, &random_token());
-    if budget > 0 && !env.cancel.is_cancelled() && env.filter.check(url.as_str()).is_ok() {
+    if let Some(follow) = follow_client
+        && budget > 0
+        && !env.cancel.is_cancelled()
+        && env.filter.check(url.as_str()).is_ok()
+    {
         budget -= 1;
         tokio::select! {
             _ = tokio::time::sleep(env.min_interval) => {
-                not_found = probe_not_found(follow_client, &url, env.cancel).await;
+                not_found = probe_not_found(follow, &url, env.cancel).await;
             }
             _ = env.cancel.cancelled() => {}
         }
@@ -235,10 +240,10 @@ pub async fn run_post_crawl_probes(
     budget = budget.saturating_sub(made);
 
     let (mut external, mut external_unchecked) = (Vec::new(), 0);
-    if check_external_links_setting {
+    if let Some(follow) = follow_client.filter(|_| check_external_links_setting) {
         let targets = external_targets(pages, env.start);
         (external, _) = check_external_links(
-            follow_client,
+            follow,
             &targets,
             budget,
             env.min_interval,

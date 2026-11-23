@@ -582,7 +582,11 @@ pub fn run_checks(input: &CheckInput) -> Vec<Finding> {
             };
             push(FindingCode::Soft404Site, &site_url, vec![], Some(detail));
         }
-        if !probe.redirected {
+        // La page de départ au gabarit de la page d'erreur : le site porte son habillage partout.
+        let start_like_error = reference_page(pages, start_url)
+            .and_then(|p| p.facts.as_ref())
+            .is_some_and(|f| has_error_page_signature(f, probe));
+        if !probe.redirected && !start_like_error {
             let candidates: Vec<&PageRecord> = pages
                 .iter()
                 .filter(|p| is_html_200(p) && is_internal(&p.url) && in_scope(&p.url))
@@ -2634,21 +2638,12 @@ mod tests {
     fn signature_shared_by_most_pages_is_not_a_soft_404() {
         let probe = error_page_probe(Some("Témoin"), Some("Témoin"), "hash-erreur");
         let themed = |path: &str| html(path).title(Some("Témoin")).h1_texts(&["Témoin"]).rec();
-        // 3 pages sur 4 : un thème qui met le nom du site partout.
-        let pages = vec![
-            themed("/a"),
-            themed("/b"),
-            themed("/c"),
-            html("/d").title(Some("Autre")).h1_texts(&["Autre"]).rec(),
-        ];
+        let own = |path: &str| html(path).title(Some(path)).h1_texts(&[path]).rec();
+        // 3 pages sur 4 (l'accueil diffère, le garde-fou de la page de départ ne joue pas).
+        let pages = vec![own("/"), themed("/a"), themed("/b"), themed("/c")];
         assert!(soft_404_urls(&pages, Some(&probe)).is_empty());
         // Exactement la moitié : pas plus de la moitié, donc signalées.
-        let pages = vec![
-            themed("/a"),
-            themed("/b"),
-            html("/c").title(Some("C")).h1_texts(&["C"]).rec(),
-            html("/d").title(Some("D")).h1_texts(&["D"]).rec(),
-        ];
+        let pages = vec![own("/"), themed("/a"), themed("/b"), own("/c")];
         assert_eq!(
             soft_404_urls(&pages, Some(&probe)),
             vec![full("/a"), full("/b")]
@@ -2704,5 +2699,79 @@ mod tests {
         for other in [Some(500), Some(403), Some(200), None] {
             assert!(with_status(other).is_empty(), "{other:?}");
         }
+    }
+
+    #[test]
+    fn soft_404_needs_a_start_page_that_differs_from_the_error_page() {
+        let probe = error_page_probe(Some("Introuvable"), Some("Oups"), "hash-erreur");
+        let like_error = |path: &str| html(path).title(Some("Introuvable")).h1_texts(&["Oups"]);
+        let own = |path: &str| html(path).title(Some(path)).h1_texts(&[path]);
+
+        // Accueil au gabarit de la page d'erreur, une page différente : rien.
+        let pages = vec![like_error("/").rec(), own("/contact").rec()];
+        assert!(soft_404_urls(&pages, Some(&probe)).is_empty());
+
+        // Accueil et /contact différents, seule /fantome ressemble : elle seule.
+        let pages = vec![
+            own("/").rec(),
+            own("/contact").rec(),
+            like_error("/fantome").rec(),
+        ];
+        assert_eq!(soft_404_urls(&pages, Some(&probe)), vec![full("/fantome")]);
+
+        // Accueil identique par l'empreinte seule : rien.
+        let pages = vec![
+            own("/").hash("hash-erreur").rec(),
+            own("/contact").rec(),
+            own("/b").rec(),
+            like_error("/fantome").rec(),
+        ];
+        assert!(soft_404_urls(&pages, Some(&probe)).is_empty());
+    }
+
+    #[test]
+    fn soft_404_reference_page_in_list_mode_is_the_first_listed_answer() {
+        let probe = error_page_probe(Some("Introuvable"), Some("Oups"), "hash-erreur");
+        let like_error = |path: &str| html(path).title(Some("Introuvable")).h1_texts(&["Oups"]);
+        let own = |path: &str| html(path).title(Some(path)).h1_texts(&[path]);
+        let run = |pages: &[PageRecord]| {
+            let links = analyze_links(pages, START);
+            let sm = no_sitemap();
+            let list = [
+                full("/"),
+                full("/b"),
+                full("/fantome"),
+                full("/c"),
+                full("/d"),
+            ];
+            let found = run_checks(&CheckInput {
+                not_found: Some(&probe),
+                list: Some(&list),
+                ..CheckInput::new(pages, &links, &sm, START)
+            });
+            urls_of(&found, FindingCode::Soft404)
+        };
+        let pages = vec![
+            like_error("/").rec(),
+            own("/b").rec(),
+            like_error("/fantome").rec(),
+            own("/c").rec(),
+        ];
+        assert!(run(&pages).is_empty());
+        let pages = vec![
+            own("/").rec(),
+            own("/b").rec(),
+            like_error("/fantome").rec(),
+            own("/c").rec(),
+        ];
+        assert_eq!(run(&pages), vec![full("/fantome")]);
+        // Adresse de départ sans ligne : la première page HTML 200 sert de référence.
+        let pages = vec![
+            like_error("/b").rec(),
+            own("/c").rec(),
+            like_error("/fantome").rec(),
+            own("/d").rec(),
+        ];
+        assert!(run(&pages).is_empty());
     }
 }

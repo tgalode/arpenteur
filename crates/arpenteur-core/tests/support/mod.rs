@@ -50,6 +50,8 @@ pub enum Variant {
     RobotsBlocksNotFound,
     /// L'adresse inexistante accepte la connexion et ne répond jamais.
     NotFoundHangs,
+    /// L'adresse inexistante répond 200 avec un corps de 3 Mo ; title et H1 sont dans le premier Ko.
+    HugeNotFoundBody,
 }
 
 /// Début de l'adresse inexistante demandée après le crawl.
@@ -194,6 +196,13 @@ async fn handle(State(st): State<AppState>, headers: HeaderMap, uri: Uri) -> Res
                     ERROR_PAGE,
                 )
                     .into_response();
+            }
+            Variant::HugeNotFoundBody => {
+                let head = r#"<!doctype html><html><head><title>Gros corps</title></head><body><h1>Gros H1</h1><p>"#;
+                return html(format!(
+                    "{head}{}</p></body></html>",
+                    "mot ".repeat(750_000)
+                ));
             }
             Variant::NotFoundHangs => {
                 std::future::pending::<()>().await;
