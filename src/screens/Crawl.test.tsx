@@ -344,7 +344,7 @@ test("un clic sur un code filtre le tableau sur ses URL", async () => {
   render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
   await screen.findByText("https://exemple.fr/tarifs");
   expect(screen.getAllByRole("row")).toHaveLength(3);
-  await userEvent.click(screen.getByRole("button", { name: "Meta description trop courte (moins de 70 caractères), 1" }));
+  await userEvent.click(screen.getByRole("button", { name: "Meta description trop courte (moins de 70 caractères), opportunité, 1" }));
   expect(screen.getAllByRole("row")).toHaveLength(2);
   expect(firstDataRowUrl()).toBe("https://exemple.fr/tarifs");
   const filter = screen.getByRole("status", { name: "filtre actif" });

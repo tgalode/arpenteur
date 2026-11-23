@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import { t, type FrKey } from "../i18n/fr";
-import { CATALOG, findingTitle, LEVELS, type Level } from "../lib/catalog";
+import { CATALOG, findingTitle, kindLabel, LEVELS, type Level } from "../lib/catalog";
 import type { Finding, FindingCode } from "../lib/types";
 
 export function levelLabel(level: Level): string {
@@ -45,16 +45,19 @@ export function ProblemsPanel({
             {g.codes.map((code) => {
               const count = counts.get(code) ?? 0;
               const title = findingTitle(code);
+              const kind = kindLabel(CATALOG[code].kind);
               return (
                 <li key={code}>
                   <button
                     type="button"
                     className="problems-code"
                     aria-pressed={code === selectedCode}
-                    aria-label={t("problems_code_label", { title, count })}
+                    aria-label={t("problems_code_label", { title, kind, count })}
                     onClick={() => onSelect(code === selectedCode ? null : code)}
                   >
-                    <span>{title}</span>
+                    <span>
+                      {title} <span className="problems-kind dim">{kind}</span>
+                    </span>
                     <span className="n">{count}</span>
                   </button>
                 </li>

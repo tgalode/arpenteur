@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import codes from "./finding-codes.json";
-import { CATALOG, findingFix, findingTitle, findingWhy } from "./catalog";
+import { CATALOG, findingFix, findingTitle, findingWhy, KINDS, kindLabel, THEMES, themeLabel, type Kind, type Theme } from "./catalog";
 import type { FindingCode } from "./types";
 
 const allCodes = codes as FindingCode[];
@@ -85,4 +85,76 @@ test("les trois nouvelles entrées reprennent les textes de la conception", () =
   expect(findingFix("robotsTxtMissing")).toBe(
     "Ajouter un fichier robots.txt à la racine, avec l'adresse du sitemap.",
   );
+});
+
+// Tableau « Type et thème de chaque code » de la conception, écrit en clair.
+const EXPECTED: Record<FindingCode, [Kind, Theme]> = {
+  canonicalMissing: ["probleme", "canonical"],
+  canonicalToOtherUrl: ["avertissement", "canonical"],
+  canonicalToRedirect: ["probleme", "canonical"],
+  canonicalToError: ["probleme", "canonical"],
+  canonicalToOtherHost: ["avertissement", "canonical"],
+  temporaryRedirect: ["avertissement", "reponses"],
+  redirectChain: ["probleme", "reponses"],
+  brokenInternalLink: ["probleme", "liens"],
+  imageTooHeavy: ["opportunite", "images"],
+  jsonLdMissing: ["opportunite", "technique"],
+  jsonLdInvalid: ["probleme", "technique"],
+  orphanPage: ["avertissement", "liens"],
+  notInSitemap: ["avertissement", "indexation"],
+  sitemapUrlError: ["probleme", "indexation"],
+  sitemapUrlNonIndexable: ["probleme", "indexation"],
+  sitemapNotFound: ["avertissement", "indexation"],
+  duplicateContent: ["probleme", "contenu"],
+  thinContent: ["opportunite", "contenu"],
+  noindex: ["avertissement", "indexation"],
+  serverError: ["probleme", "reponses"],
+  titleMissing: ["probleme", "titles"],
+  titleTooLong: ["opportunite", "titles"],
+  titleTooShort: ["opportunite", "titles"],
+  metaDescriptionMissing: ["opportunite", "metaDescriptions"],
+  metaDescriptionTooLong: ["opportunite", "metaDescriptions"],
+  metaDescriptionTooShort: ["opportunite", "metaDescriptions"],
+  h1Missing: ["probleme", "headings"],
+  h1Multiple: ["avertissement", "headings"],
+  titleDuplicate: ["probleme", "titles"],
+  metaDescriptionDuplicate: ["opportunite", "metaDescriptions"],
+  imageMissingAlt: ["probleme", "images"],
+  headingStructure: ["avertissement", "headings"],
+  htmlLangMissing: ["avertissement", "technique"],
+  phoneNotClickable: ["opportunite", "technique"],
+  modernCompressionMissing: ["opportunite", "technique"],
+  httpsInvalid: ["probleme", "technique"],
+  securityHeadersMissing: ["avertissement", "technique"],
+  brokenExternalLink: ["probleme", "liens"],
+  h1Duplicate: ["opportunite", "headings"],
+  h1TooLong: ["opportunite", "headings"],
+  canonicalMultiple: ["probleme", "canonical"],
+  listedUrlError: ["probleme", "reponses"],
+  soft404: ["probleme", "reponses"],
+  soft404Site: ["probleme", "reponses"],
+  robotsTxtMissing: ["avertissement", "indexation"],
+};
+
+test("chaque code a le type et le thème de la conception", () => {
+  expect(Object.keys(EXPECTED).sort()).toEqual([...allCodes].sort());
+  for (const code of allCodes) {
+    expect([CATALOG[code].kind, CATALOG[code].theme], code).toEqual(EXPECTED[code]);
+  }
+});
+
+test("chaque thème et chaque type a son libellé", () => {
+  expect(KINDS.map(kindLabel)).toEqual(["problème", "avertissement", "opportunité"]);
+  expect(THEMES.map(themeLabel)).toEqual([
+    "réponses et redirections",
+    "liens",
+    "titles",
+    "meta descriptions",
+    "titres H1 à H6",
+    "canonical",
+    "indexation et sitemap",
+    "contenu",
+    "images",
+    "technique",
+  ]);
 });

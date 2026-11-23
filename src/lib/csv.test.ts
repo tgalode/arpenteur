@@ -84,19 +84,19 @@ test("le CSV écrit des nombres bruts, pas des valeurs mises en forme", () => {
   expect(cells.slice(14)).toEqual(["1500", "7"]);
 });
 
-test("problemsCsv donne le niveau et le titre du catalogue", () => {
+test("le CSV des problèmes a une colonne type entre niveau et code", () => {
   const csv = problemsCsv([
     finding({ detail: "manquant", related: ["https://exemple.fr/x", "https://exemple.fr/y"] }),
   ]);
   const lines = csv.slice(1).split("\r\n");
-  expect(lines[0]).toBe("niveau;code;problème;URL;détail;URL liées");
+  expect(lines[0]).toBe("niveau;type;code;problème;URL;détail;URL liées");
   expect(lines[1]).toBe(
-    `haute;titleMissing;${findingTitle("titleMissing")};https://exemple.fr/a;manquant;https://exemple.fr/x https://exemple.fr/y`,
+    `haute;problème;titleMissing;${findingTitle("titleMissing")};https://exemple.fr/a;manquant;https://exemple.fr/x https://exemple.fr/y`,
   );
 });
 
 test("sans constat, problemsCsv ne contient que l’en-tête", () => {
-  expect(problemsCsv([]).slice(1)).toBe("niveau;code;problème;URL;détail;URL liées");
+  expect(problemsCsv([]).slice(1)).toBe("niveau;type;code;problème;URL;détail;URL liées");
 });
 
 test("les cellules sont protégées contre l’injection de formule", () => {
@@ -131,7 +131,7 @@ test("problemsCsv trie par niveau, puis par code du catalogue, puis par URL", ()
     finding({ code: "titleMissing", url: "https://exemple.fr/a" }),
   ]);
   const lines = csv.slice(1).split("\r\n").slice(1);
-  expect(lines.map((l) => l.split(";").slice(0, 2).concat(l.split(";")[3]).join(" "))).toEqual([
+  expect(lines.map((l) => l.split(";").slice(0, 1).concat(l.split(";").slice(2, 3), l.split(";")[4]).join(" "))).toEqual([
     "haute brokenInternalLink https://exemple.fr/m",
     "haute titleMissing https://exemple.fr/a",
     "haute titleMissing https://exemple.fr/b",

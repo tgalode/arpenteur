@@ -6,52 +6,82 @@ export type Level = "haute" | "moyenne" | "basse" | "info";
 /** Du plus grave au moins grave. */
 export const LEVELS: Level[] = ["haute", "moyenne", "basse", "info"];
 
-export const CATALOG: Record<FindingCode, { level: Level }> = {
-  brokenInternalLink: { level: "haute" },
-  serverError: { level: "haute" },
-  canonicalToError: { level: "haute" },
-  canonicalToRedirect: { level: "haute" },
-  sitemapUrlError: { level: "haute" },
-  titleMissing: { level: "haute" },
-  httpsInvalid: { level: "haute" },
-  listedUrlError: { level: "haute" },
-  soft404: { level: "haute" },
-  soft404Site: { level: "haute" },
-  redirectChain: { level: "moyenne" },
-  temporaryRedirect: { level: "moyenne" },
-  canonicalMissing: { level: "moyenne" },
-  canonicalToOtherHost: { level: "moyenne" },
-  canonicalMultiple: { level: "moyenne" },
-  orphanPage: { level: "moyenne" },
-  duplicateContent: { level: "moyenne" },
-  titleDuplicate: { level: "moyenne" },
-  metaDescriptionMissing: { level: "moyenne" },
-  h1Missing: { level: "moyenne" },
-  jsonLdInvalid: { level: "moyenne" },
-  sitemapNotFound: { level: "moyenne" },
-  sitemapUrlNonIndexable: { level: "moyenne" },
-  imageMissingAlt: { level: "moyenne" },
-  imageTooHeavy: { level: "moyenne" },
-  brokenExternalLink: { level: "moyenne" },
-  titleTooLong: { level: "basse" },
-  titleTooShort: { level: "basse" },
-  metaDescriptionTooLong: { level: "basse" },
-  metaDescriptionTooShort: { level: "basse" },
-  metaDescriptionDuplicate: { level: "basse" },
-  h1Multiple: { level: "basse" },
-  h1Duplicate: { level: "basse" },
-  h1TooLong: { level: "basse" },
-  headingStructure: { level: "basse" },
-  jsonLdMissing: { level: "basse" },
-  htmlLangMissing: { level: "basse" },
-  securityHeadersMissing: { level: "basse" },
-  phoneNotClickable: { level: "basse" },
-  modernCompressionMissing: { level: "basse" },
-  robotsTxtMissing: { level: "basse" },
-  canonicalToOtherUrl: { level: "info" },
-  noindex: { level: "info" },
-  notInSitemap: { level: "info" },
-  thinContent: { level: "info" },
+export type Kind = "probleme" | "avertissement" | "opportunite";
+
+export const KINDS: Kind[] = ["probleme", "avertissement", "opportunite"];
+
+export type Theme =
+  | "reponses"
+  | "liens"
+  | "titles"
+  | "metaDescriptions"
+  | "headings"
+  | "canonical"
+  | "indexation"
+  | "contenu"
+  | "images"
+  | "technique";
+
+/** Dans l'ordre du tableau de la conception. */
+export const THEMES: Theme[] = [
+  "reponses",
+  "liens",
+  "titles",
+  "metaDescriptions",
+  "headings",
+  "canonical",
+  "indexation",
+  "contenu",
+  "images",
+  "technique",
+];
+
+export const CATALOG: Record<FindingCode, { level: Level; kind: Kind; theme: Theme }> = {
+  brokenInternalLink: { level: "haute", kind: "probleme", theme: "liens" },
+  serverError: { level: "haute", kind: "probleme", theme: "reponses" },
+  canonicalToError: { level: "haute", kind: "probleme", theme: "canonical" },
+  canonicalToRedirect: { level: "haute", kind: "probleme", theme: "canonical" },
+  sitemapUrlError: { level: "haute", kind: "probleme", theme: "indexation" },
+  titleMissing: { level: "haute", kind: "probleme", theme: "titles" },
+  httpsInvalid: { level: "haute", kind: "probleme", theme: "technique" },
+  listedUrlError: { level: "haute", kind: "probleme", theme: "reponses" },
+  soft404: { level: "haute", kind: "probleme", theme: "reponses" },
+  soft404Site: { level: "haute", kind: "probleme", theme: "reponses" },
+  redirectChain: { level: "moyenne", kind: "probleme", theme: "reponses" },
+  temporaryRedirect: { level: "moyenne", kind: "avertissement", theme: "reponses" },
+  canonicalMissing: { level: "moyenne", kind: "probleme", theme: "canonical" },
+  canonicalToOtherHost: { level: "moyenne", kind: "avertissement", theme: "canonical" },
+  canonicalMultiple: { level: "moyenne", kind: "probleme", theme: "canonical" },
+  orphanPage: { level: "moyenne", kind: "avertissement", theme: "liens" },
+  duplicateContent: { level: "moyenne", kind: "probleme", theme: "contenu" },
+  titleDuplicate: { level: "moyenne", kind: "probleme", theme: "titles" },
+  metaDescriptionMissing: { level: "moyenne", kind: "opportunite", theme: "metaDescriptions" },
+  h1Missing: { level: "moyenne", kind: "probleme", theme: "headings" },
+  jsonLdInvalid: { level: "moyenne", kind: "probleme", theme: "technique" },
+  sitemapNotFound: { level: "moyenne", kind: "avertissement", theme: "indexation" },
+  sitemapUrlNonIndexable: { level: "moyenne", kind: "probleme", theme: "indexation" },
+  imageMissingAlt: { level: "moyenne", kind: "probleme", theme: "images" },
+  imageTooHeavy: { level: "moyenne", kind: "opportunite", theme: "images" },
+  brokenExternalLink: { level: "moyenne", kind: "probleme", theme: "liens" },
+  titleTooLong: { level: "basse", kind: "opportunite", theme: "titles" },
+  titleTooShort: { level: "basse", kind: "opportunite", theme: "titles" },
+  metaDescriptionTooLong: { level: "basse", kind: "opportunite", theme: "metaDescriptions" },
+  metaDescriptionTooShort: { level: "basse", kind: "opportunite", theme: "metaDescriptions" },
+  metaDescriptionDuplicate: { level: "basse", kind: "opportunite", theme: "metaDescriptions" },
+  h1Multiple: { level: "basse", kind: "avertissement", theme: "headings" },
+  h1Duplicate: { level: "basse", kind: "opportunite", theme: "headings" },
+  h1TooLong: { level: "basse", kind: "opportunite", theme: "headings" },
+  headingStructure: { level: "basse", kind: "avertissement", theme: "headings" },
+  jsonLdMissing: { level: "basse", kind: "opportunite", theme: "technique" },
+  htmlLangMissing: { level: "basse", kind: "avertissement", theme: "technique" },
+  securityHeadersMissing: { level: "basse", kind: "avertissement", theme: "technique" },
+  phoneNotClickable: { level: "basse", kind: "opportunite", theme: "technique" },
+  modernCompressionMissing: { level: "basse", kind: "opportunite", theme: "technique" },
+  robotsTxtMissing: { level: "basse", kind: "avertissement", theme: "indexation" },
+  canonicalToOtherUrl: { level: "info", kind: "avertissement", theme: "canonical" },
+  noindex: { level: "info", kind: "avertissement", theme: "indexation" },
+  notInSitemap: { level: "info", kind: "avertissement", theme: "indexation" },
+  thinContent: { level: "info", kind: "opportunite", theme: "contenu" },
 };
 
 export function findingTitle(code: FindingCode): string {
@@ -65,4 +95,12 @@ export function findingWhy(code: FindingCode): string {
 export function findingFix(code: FindingCode): string | null {
   if (CATALOG[code].level === "info") return null;
   return t(`finding_${code}_fix` as FrKey);
+}
+
+export function kindLabel(kind: Kind): string {
+  return t(`kind_${kind}` as FrKey);
+}
+
+export function themeLabel(theme: Theme): string {
+  return t(`theme_${theme}` as FrKey);
 }

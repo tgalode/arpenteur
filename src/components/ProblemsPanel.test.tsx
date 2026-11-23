@@ -29,7 +29,7 @@ test("le panneau groupe par niveau avec les compteurs", () => {
   expect(within(panel).getByRole("heading", { name: "moyenne 5" })).toBeTruthy();
   expect(within(panel).getByRole("heading", { name: "basse 8" })).toBeTruthy();
   expect(within(panel).getByRole("heading", { name: "information 4" })).toBeTruthy();
-  expect(within(panel).getByRole("button", { name: "Lien interne cassé, 2" })).toBeTruthy();
+  expect(within(panel).getByRole("button", { name: "Lien interne cassé, problème, 2" })).toBeTruthy();
 });
 
 test("un code sans constat n’apparaît pas", () => {
@@ -50,12 +50,21 @@ test("sans aucun constat, le panneau le dit", () => {
 test("un clic sur un code le sélectionne, un second clic le retire", async () => {
   const onSelect = vi.fn();
   const { rerender } = render(<ProblemsPanel findings={FINDINGS} selectedCode={null} onSelect={onSelect} />);
-  const btn = screen.getByRole("button", { name: "Lien interne cassé, 2" });
+  const btn = screen.getByRole("button", { name: "Lien interne cassé, problème, 2" });
   expect(btn.getAttribute("aria-pressed")).toBe("false");
   await userEvent.click(btn);
   expect(onSelect).toHaveBeenLastCalledWith("brokenInternalLink");
   rerender(<ProblemsPanel findings={FINDINGS} selectedCode="brokenInternalLink" onSelect={onSelect} />);
-  expect(screen.getByRole("button", { name: "Lien interne cassé, 2" }).getAttribute("aria-pressed")).toBe("true");
-  await userEvent.click(screen.getByRole("button", { name: "Lien interne cassé, 2" }));
+  expect(screen.getByRole("button", { name: "Lien interne cassé, problème, 2" }).getAttribute("aria-pressed")).toBe("true");
+  await userEvent.click(screen.getByRole("button", { name: "Lien interne cassé, problème, 2" }));
   expect(onSelect).toHaveBeenLastCalledWith(null);
+});
+
+test("le panneau affiche le type sur chaque ligne de problème", () => {
+  render(<ProblemsPanel findings={FINDINGS} selectedCode={null} onSelect={() => {}} />);
+  const panel = screen.getByRole("complementary", { name: "problèmes" });
+  const line = within(panel).getByRole("button", { name: "Lien interne cassé, problème, 2" });
+  expect(within(line).getByText("problème").className).toContain("dim");
+  expect(within(panel).getByRole("button", { name: "Page orpheline, avertissement, 2" })).toBeTruthy();
+  expect(within(panel).getByRole("button", { name: "Title trop long (plus de 60 caractères), opportunité, 5" })).toBeTruthy();
 });

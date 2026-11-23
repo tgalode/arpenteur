@@ -82,6 +82,28 @@ Les seuils viennent de la conception (D5) et restent réglables.
 | `notInSitemap` | Page absente du sitemap | La page est indexable mais le sitemap ne l'annonce pas. | nous |
 | `thinContent` | Contenu court (moins de 200 mots) | Peu de texte. C'est normal pour une page contact, à enrichir pour une page de service. | nous |
 
+## Type et thème de chaque problème
+
+Trois types, repris de Screaming Frog :
+- **problème** : une erreur à corriger ;
+- **avertissement** : à vérifier, ce n'est pas forcément une erreur ;
+- **opportunité** : une amélioration possible.
+
+Le type ne remplace pas le niveau : un problème garde sa priorité haute, moyenne ou basse.
+
+| Thème | Problème | Avertissement | Opportunité |
+|---|---|---|---|
+| Réponses et redirections | `serverError`, `soft404`, `soft404Site`, `listedUrlError`, `redirectChain` | `temporaryRedirect` | |
+| Liens | `brokenInternalLink`, `brokenExternalLink` | `orphanPage` | |
+| Titles | `titleMissing`, `titleDuplicate` | | `titleTooLong`, `titleTooShort` |
+| Meta descriptions | | | `metaDescriptionMissing`, `metaDescriptionDuplicate`, `metaDescriptionTooLong`, `metaDescriptionTooShort` |
+| Titres H1 à H6 | `h1Missing` | `h1Multiple`, `headingStructure` | `h1Duplicate`, `h1TooLong` |
+| Canonical | `canonicalMissing`, `canonicalToError`, `canonicalToRedirect`, `canonicalMultiple` | `canonicalToOtherHost`, `canonicalToOtherUrl` | |
+| Indexation et sitemap | `sitemapUrlError`, `sitemapUrlNonIndexable` | `noindex`, `notInSitemap`, `sitemapNotFound`, `robotsTxtMissing` | |
+| Contenu | `duplicateContent` | | `thinContent` |
+| Images | `imageMissingAlt` | | `imageTooHeavy` |
+| Technique | `httpsInvalid`, `jsonLdInvalid` | `securityHeadersMissing`, `htmlLangMissing` | `jsonLdMissing`, `phoneNotClickable`, `modernCompressionMissing` |
+
 ## Écartés du catalogue
 
 Ces analyses de SiteOne restent visibles dans son rapport technique, mais ne deviennent pas des problèmes Arpenteur. Elles visent la qualité du code plus que le référencement, ou produiraient trop de bruit pour un site de TPE :

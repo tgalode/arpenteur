@@ -700,6 +700,10 @@ select {
   color: var(--strong);
 }
 
+.problems-kind {
+  font-size: 0.9em;
+}
+
 .problems-code .n {
   flex: none;
   font-variant-numeric: tabular-nums;

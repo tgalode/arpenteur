@@ -1,5 +1,5 @@
 import { t } from "../i18n/fr";
-import { CATALOG, findingTitle, LEVELS } from "./catalog";
+import { CATALOG, findingTitle, kindLabel, LEVELS } from "./catalog";
 import codes from "./finding-codes.json";
 import { ALL_COLUMN_KEYS } from "./columns";
 import { urlColumn } from "./urlColumns";
@@ -48,9 +48,10 @@ function byLevelCodeUrl(a: Finding, b: Finding): number {
 
 export function problemsCsv(findings: Finding[]): string {
   return toCsv(
-    [t("csv_level"), t("csv_code"), t("csv_problem"), t("csv_url"), t("csv_detail"), t("csv_related")],
+    [t("csv_level"), t("csv_kind"), t("csv_code"), t("csv_problem"), t("csv_url"), t("csv_detail"), t("csv_related")],
     [...findings].sort(byLevelCodeUrl).map((f) => [
       t(`level_${CATALOG[f.code].level}`),
+      kindLabel(CATALOG[f.code].kind),
       f.code,
       findingTitle(f.code),
       f.url,

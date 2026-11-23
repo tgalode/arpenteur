@@ -1,5 +1,5 @@
 import { t } from "../i18n/fr";
-import { CATALOG, findingFix, findingTitle, findingWhy, LEVELS } from "../lib/catalog";
+import { CATALOG, findingFix, findingTitle, findingWhy, kindLabel, LEVELS } from "../lib/catalog";
 import { normalizeUrl } from "../lib/urls";
 import type { CrawlResult, ExternalCheck, Finding, FindingCode, UrlRow } from "../lib/types";
 import { levelLabel } from "./ProblemsPanel";
@@ -103,7 +103,8 @@ export function UrlDetail({ row, result }: { row: UrlRow; result: CrawlResult })
               <li key={i} className={`lv-${level}`}>
                 <p>
                   <span className="problems-dot" aria-hidden="true" />
-                  <span className="strong">{findingTitle(f.code)}</span> <span className="dim">{levelLabel(level)}</span>
+                  <span className="strong">{findingTitle(f.code)}</span> <span className="dim">{levelLabel(level)}</span>{" "}
+                  <span className="dim">{kindLabel(CATALOG[f.code].kind)}</span>
                 </p>
                 {target && (
                   <p className="detail-problem-detail">{t(CARRIER_CODES[f.code]!, { url: target })}</p>

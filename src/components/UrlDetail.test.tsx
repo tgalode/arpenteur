@@ -202,3 +202,10 @@ test("un lien externe cassé en 404 affiche 404 dans les liens sortants", () => 
   });
   expect(within(view.getByText(dead).closest("li")!).getByText("404")).toBeTruthy();
 });
+
+test("le détail d'une URL affiche le type à côté du niveau", () => {
+  const view = detail(site("/a"), [finding({ code: "titleMissing", url: site("/a") })], [site("/a")]);
+  const item = view.getByText("Title absent").closest("li")!;
+  expect(item.textContent).toContain("haute");
+  expect(within(item).getByText("problème")).toBeTruthy();
+});
