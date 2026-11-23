@@ -354,6 +354,25 @@ test("un clic sur un code filtre le tableau sur ses URL", async () => {
   expect(screen.queryByRole("status", { name: "filtre actif" })).toBeNull();
 });
 
+test("un clic sur « 4xx » du résumé filtre le tableau et la liste de statut le suit", async () => {
+  const r = result({ kind: "completed" });
+  r.rows = [
+    row("https://exemple.fr/", { status: 200 }),
+    row("https://exemple.fr/absente", { status: 404 }),
+    row("https://exemple.fr/ancienne", { status: 410 }),
+  ];
+  vi.mocked(api.loadCrawl).mockResolvedValue(r);
+  render(<Crawl domain="exemple.fr" id="abc" running={false} onBack={() => {}} onOpen={() => {}} />);
+  await screen.findByText("https://exemple.fr/absente");
+  expect(screen.getAllByRole("row")).toHaveLength(4);
+  await userEvent.click(screen.getByRole("button", { name: "4xx, 2" }));
+  expect(screen.getAllByRole("row")).toHaveLength(3);
+  expect((screen.getByRole("combobox", { name: "classe de statut" }) as HTMLSelectElement).value).toBe("4xx");
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "classe de statut" }), "all");
+  expect(screen.getByRole("button", { name: "4xx, 2" }).getAttribute("aria-pressed")).toBe("false");
+  expect(screen.getAllByRole("row")).toHaveLength(4);
+});
+
 test("les URL liées d’un constat entrent dans le filtre", async () => {
   vi.mocked(api.loadCrawl).mockResolvedValue(
     withFindings([

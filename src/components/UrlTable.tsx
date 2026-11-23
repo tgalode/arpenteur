@@ -22,14 +22,17 @@ export function UrlTable({
   selectedUrl,
   urlFilter,
   onSelect,
+  statusClass,
+  onStatusClass,
 }: {
   rows: UrlRow[];
   selectedUrl: string | null;
   urlFilter: Set<string> | null;
   onSelect: (row: UrlRow) => void;
+  statusClass: StatusClass;
+  onStatusClass: (c: StatusClass) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [statusClass, setStatusClass] = useState<StatusClass>("all");
   const [sort, setSort] = useState<{ key: keyof UrlRow; dir: "asc" | "desc" } | null>(null);
   const [columnKeys, setColumnKeys] = useState<ColumnKey[]>(loadColumnKeys);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -75,7 +78,7 @@ export function UrlTable({
           className="field"
           aria-label={t("statusFilterLabel")}
           value={statusClass}
-          onChange={(e) => setStatusClass(e.target.value as StatusClass)}
+          onChange={(e) => onStatusClass(e.target.value as StatusClass)}
         >
           {STATUS_CLASSES.map((c) => (
             <option key={c} value={c}>

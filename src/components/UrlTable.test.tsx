@@ -1,6 +1,8 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
+import type { StatusClass } from "../lib/table";
 import type { Indexability, UrlRow } from "../lib/types";
 import { UrlTable } from "./UrlTable";
 
@@ -60,6 +62,8 @@ test("indexable affiche oui, non ou non analysé", () => {
       selectedUrl={null}
       urlFilter={null}
       onSelect={() => {}}
+      statusClass="all"
+      onStatusClass={() => {}}
     />,
   );
   const cells = screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[5]);
@@ -67,8 +71,22 @@ test("indexable affiche oui, non ou non analysé", () => {
   expect(cells.map((c) => c.className)).toEqual(["tone-ok", "tone-err", "dim"]);
 });
 
-function renderTable(rows: UrlRow[]) {
-  return render(<UrlTable rows={rows} selectedUrl={null} urlFilter={null} onSelect={() => {}} />);
+function Controlled({ rows, initial = "all" }: { rows: UrlRow[]; initial?: StatusClass }) {
+  const [statusClass, setStatusClass] = useState<StatusClass>(initial);
+  return (
+    <UrlTable
+      rows={rows}
+      selectedUrl={null}
+      urlFilter={null}
+      onSelect={() => {}}
+      statusClass={statusClass}
+      onStatusClass={setStatusClass}
+    />
+  );
+}
+
+function renderTable(rows: UrlRow[], initial: StatusClass = "all") {
+  return render(<Controlled rows={rows} initial={initial} />);
 }
 
 const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent);
@@ -220,4 +238,13 @@ test("en mode liste, les lignes sans profondeur ni liens entrants passent en der
   await userEvent.click(header);
   expect(order()[2]).toBe("https://exemple.fr/liste");
   expect(order()[0]).toBe("https://exemple.fr/p2");
+});
+
+test("la liste de statut montre la classe pilotée et la change", async () => {
+  renderTable([row("https://exemple.fr/a", "yes"), row("https://exemple.fr/b", "yes", { status: 404 })], "4xx");
+  const select = screen.getByRole("combobox", { name: "classe de statut" }) as HTMLSelectElement;
+  expect(select.value).toBe("4xx");
+  expect(screen.getAllByRole("row")).toHaveLength(2);
+  await userEvent.selectOptions(select, "all");
+  expect(screen.getAllByRole("row")).toHaveLength(3);
 });

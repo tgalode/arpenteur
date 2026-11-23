@@ -6,7 +6,7 @@ import { formatElapsed, t } from "../i18n/fr";
 import { exportCsv, loadCrawl, onFinished, onProgress, startCrawl, startListCrawl, stopCrawl } from "../lib/api";
 import { findingTitle } from "../lib/catalog";
 import { problemsCsv, urlsCsv } from "../lib/csv";
-import { statusTone } from "../lib/table";
+import { statusTone, type StatusClass } from "../lib/table";
 import { normalizeUrl } from "../lib/urls";
 import type { CrawlResult, CrawlStatus, FindingCode, Progress, SkippedUrl, UrlRow } from "../lib/types";
 
@@ -52,6 +52,7 @@ export function Crawl({
   const [result, setResult] = useState<CrawlResult | null>(null);
   const [selected, setSelected] = useState<UrlRow | null>(null);
   const [selectedCode, setSelectedCode] = useState<FindingCode | null>(null);
+  const [statusClass, setStatusClass] = useState<StatusClass>("all");
   const [error, setError] = useState<string | null>(null);
   const [restarting, setRestarting] = useState(false);
   const finished = useRef(false);
@@ -239,7 +240,14 @@ export function Crawl({
             </p>
           )}
           <div className="crawl-body">
-            <ProblemsPanel findings={result.findings} selectedCode={selectedCode} onSelect={setSelectedCode} />
+            <ProblemsPanel
+              findings={result.findings}
+              rows={result.rows}
+              selectedCode={selectedCode}
+              onSelect={setSelectedCode}
+              statusClass={statusClass}
+              onStatusClass={setStatusClass}
+            />
             <div className="crawl-main">
               {selectedCode && (
                 <p role="status" aria-label={t("problems_filter_label")} className="problems-filter">
@@ -254,6 +262,8 @@ export function Crawl({
                 selectedUrl={selected?.url ?? null}
                 urlFilter={urlFilter}
                 onSelect={setSelected}
+                statusClass={statusClass}
+                onStatusClass={setStatusClass}
               />
               {selected && <UrlDetail row={selected} result={result} />}
             </div>

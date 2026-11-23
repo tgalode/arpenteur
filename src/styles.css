@@ -853,3 +853,46 @@ select {
   color: var(--dim);
   font-size: 11px;
 }
+
+.overview {
+  margin-bottom: 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.overview-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px;
+  color: var(--dim);
+}
+
+.overview-line .n {
+  font-variant-numeric: tabular-nums;
+  color: var(--strong);
+}
+
+button.overview-line {
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.problems-grouping {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.problems-grouping .btn {
+  padding: 1px 8px;
+}
+
+.problems-grouping .btn[aria-pressed="true"] {
+  background: var(--sel);
+  color: var(--strong);
+}
